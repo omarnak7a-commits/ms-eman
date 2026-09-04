@@ -1,25 +1,24 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { seedIfEmpty } from '@/lib/db';
 
 // Layouts
 import { TeacherLayout } from '@/layouts/TeacherLayout';
 import { ExamLayout } from '@/layouts/ExamLayout';
 
 // Pages
-import { LoginPage } from '@/pages/LoginPage';
-import { DashboardPage } from '@/pages/DashboardPage';
-import { ExamsPage } from '@/pages/ExamsPage';
-import { ExamDetailPage } from '@/pages/ExamDetailPage';
-import { ExamResultsPage } from '@/pages/ExamResultsPage';
-import { AttemptDetailPage } from '@/pages/AttemptDetailPage';
-import { StudentsPage } from '@/pages/StudentsPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { ExamStartPage } from '@/pages/ExamStartPage';
-import { ExamActivePage } from '@/pages/ExamActivePage';
-import { ResultPage } from '@/pages/ResultPage';
-import { ReviewPage } from '@/pages/ReviewPage';
-import { RankingPage } from '@/pages/RankingPage';
+import { LoginPage } from '@/pages/teacher/LoginPage';
+import { DashboardPage } from '@/pages/teacher/DashboardPage';
+import { ExamsPage } from '@/pages/teacher/ExamsPage';
+import { ExamDetailPage } from '@/pages/teacher/ExamDetailPage';
+import { ExamResultsPage } from '@/pages/teacher/ExamResultsPage';
+import { AttemptDetailPage } from '@/pages/teacher/AttemptDetailPage';
+import { StudentsPage } from '@/pages/teacher/StudentsPage';
+import { SettingsPage } from '@/pages/teacher/SettingsPage';
+import { ExamStartPage } from '@/pages/student/ExamStartPage';
+import { ExamActivePage } from '@/pages/student/ExamActivePage';
+import { ResultPage } from '@/pages/student/ResultPage';
+import { ReviewPage } from '@/pages/student/ReviewPage';
+import { RankingPage } from '@/pages/student/RankingPage';
 
 // Components
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -63,8 +62,6 @@ function AppRoutes() {
 }
 
 export default function App() {
-  seedIfEmpty();
-
   return (
     <BrowserRouter>
       <AppRoutes />

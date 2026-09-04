@@ -1,26 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  getAttemptById, getExamById, getQuestionsByExam,
-  getAnswersByAttempt, saveAnswer,
-} from '@/lib/db';
-import { gradeAttempt, gradeAnswer } from '@/lib/grading';
+import { attemptsApi, getAttemptToken, type StudentQuestion } from '@/lib/api/attempts';
 import { useExamTimer } from '@/hooks/useExamTimer';
 import { Logo } from '@/components/Logo';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import type { Question, Answer, AnswerData, OrderingToken } from '@/types';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+import type { AnswerData } from '@/types';
+
+interface LiveAnswer {
+  data: AnswerData;
+  is_correct: boolean | null;
+}
 
 // ─── MCQ answer ───────────────────────────────────────────────────────────────
 
-function MCQAnswer({ question, answer, onAnswer, disabled }: {
-  question: Question;
-  answer: Answer | undefined;
+function MCQAnswer({ question, selected, onAnswer, disabled }: {
+  question: StudentQuestion;
+  selected: string | null;
   onAnswer: (data: AnswerData) => void;
   disabled: boolean;
 }) {
-  if (question.data.type !== 'multiple_choice') return null;
-  const selected = answer?.answer_data.type === 'multiple_choice' ? answer.answer_data.selected_option_id : null;
-
+  if (!question.data.options) return null;
   return (
     <div className="space-y-3">
       {question.data.options.map((opt, i) => (
@@ -48,61 +48,35 @@ function MCQAnswer({ question, answer, onAnswer, disabled }: {
 
 // ─── Ordering (Tap-to-Arrange) ────────────────────────────────────────────────
 
-function OrderingAnswer({ question, answer, onAnswer, disabled }: {
-  question: Question;
-  answer: Answer | undefined;
+function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
+  question: StudentQuestion;
+  arranged: string[];
   onAnswer: (data: AnswerData) => void;
   disabled: boolean;
 }) {
-  if (question.data.type !== 'ordering') return null;
-  const tokens = question.data.tokens;
-
-  // Shuffle tokens once using seeded order based on token ids
-  const shuffled = useRef<OrderingToken[]>([]);
-  if (shuffled.current.length === 0) {
-    shuffled.current = [...tokens].sort((a, b) => {
-      const ha = parseInt(a.id.slice(-4), 36) || 0;
-      const hb = parseInt(b.id.slice(-4), 36) || 0;
-      return ha - hb;
-    });
-  }
-
-  const existing = answer?.answer_data.type === 'ordering' ? answer.answer_data.token_ids : [];
-  const [arranged, setArranged] = useState<string[]>(existing);
-
+  const tokens = question.data.tokens || [];
   const usedIds = new Set(arranged);
-  const available = shuffled.current.filter(t => !usedIds.has(t.id));
+  const available = tokens.filter(t => !usedIds.has(t.id));
 
   const tapToken = (id: string) => {
     if (disabled) return;
-    const next = [...arranged, id];
-    setArranged(next);
-    onAnswer({ type: 'ordering', token_ids: next });
+    onAnswer({ type: 'ordering', token_ids: [...arranged, id] });
   };
-
   const removeFromSlot = (idx: number) => {
     if (disabled) return;
-    const next = arranged.filter((_, i) => i !== idx);
-    setArranged(next);
-    onAnswer({ type: 'ordering', token_ids: next });
+    onAnswer({ type: 'ordering', token_ids: arranged.filter((_, i) => i !== idx) });
   };
-
   const handleUndo = () => {
     if (disabled || arranged.length === 0) return;
-    const next = arranged.slice(0, -1);
-    setArranged(next);
-    onAnswer({ type: 'ordering', token_ids: next });
+    onAnswer({ type: 'ordering', token_ids: arranged.slice(0, -1) });
   };
-
   const handleClear = () => {
     if (disabled) return;
-    setArranged([]);
     onAnswer({ type: 'ordering', token_ids: [] });
   };
 
   return (
     <div>
-      {/* Answer slots */}
       <div className="mb-4">
         <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Your answer</p>
         <div className="flex flex-wrap gap-2 min-h-10">
@@ -126,7 +100,6 @@ function OrderingAnswer({ question, answer, onAnswer, disabled }: {
         </div>
       </div>
 
-      {/* Available tokens */}
       <div className="mb-3">
         <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Available words</p>
         <div className="flex flex-wrap gap-2">
@@ -148,20 +121,10 @@ function OrderingAnswer({ question, answer, onAnswer, disabled }: {
 
       {!disabled && (
         <div className="flex gap-2">
-          <button
-            onClick={handleUndo}
-            disabled={arranged.length === 0}
-            className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-          >
-            Undo
-          </button>
-          <button
-            onClick={handleClear}
-            disabled={arranged.length === 0}
-            className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-          >
-            Clear
-          </button>
+          <button onClick={handleUndo} disabled={arranged.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">Undo</button>
+          <button onClick={handleClear} disabled={arranged.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">Clear</button>
         </div>
       )}
     </div>
@@ -170,23 +133,13 @@ function OrderingAnswer({ question, answer, onAnswer, disabled }: {
 
 // ─── Correct Brackets answer ──────────────────────────────────────────────────
 
-function BracketsAnswer({ question, answer, onAnswer, disabled }: {
-  question: Question;
-  answer: Answer | undefined;
+function BracketsAnswer({ question, value, onAnswer, disabled }: {
+  question: StudentQuestion;
+  value: string;
   onAnswer: (data: AnswerData) => void;
   disabled: boolean;
 }) {
-  if (question.data.type !== 'correct_brackets') return null;
-  const existing = answer?.answer_data.type === 'correct_brackets' ? answer.answer_data.answer : '';
-  const [value, setValue] = useState(existing);
-
-  const handleChange = (v: string) => {
-    setValue(v);
-    onAnswer({ type: 'correct_brackets', answer: v });
-  };
-
-  const parts = question.data.sentence.split(/(\([^)]+\))/g);
-
+  const parts = (question.data.sentence || '').split(/(\([^)]+\))/g);
   return (
     <div>
       <div className="mb-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-800 leading-relaxed">
@@ -200,11 +153,11 @@ function BracketsAnswer({ question, answer, onAnswer, disabled }: {
       <input
         type="text"
         value={value}
-        onChange={e => handleChange(e.target.value)}
+        onChange={e => onAnswer({ type: 'correct_brackets', answer: e.target.value })}
         disabled={disabled}
         placeholder="Type the correct word…"
         dir="auto"
-        className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-sm focus:outline-none focus:ring-0 focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400 transition-colors"
+        className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-sm focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400 transition-colors"
       />
     </div>
   );
@@ -229,89 +182,140 @@ function FeedbackBadge({ isCorrect }: { isCorrect: boolean | null }) {
 export function ExamActivePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const token = getAttemptToken(id!) || '';
 
-  const attempt = getAttemptById(id!);
-  const exam = attempt ? getExamById(attempt.exam_id) : null;
-  const questions = exam ? getQuestionsByExam(exam.id) : [];
-  const [answers, setAnswers] = useState<Answer[]>(() => attempt ? getAnswersByAttempt(attempt.id) : []);
+  const [loading, setLoading] = useState(true);
+  const [fatal, setFatal] = useState('');
+  const [title, setTitle] = useState('');
+  const [questions, setQuestions] = useState<StudentQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, LiveAnswer>>({});
+  const [deadline, setDeadline] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [feedbacks, setFeedbacks] = useState<Record<string, boolean | null>>({});
   const [submitConfirm, setSubmitConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
-  const { secondsLeft, isExpired, formatted } = useExamTimer(attempt?.deadline_at || null);
-
-  const hasAutoSubmitted = useRef(false);
-
-  const doSubmit = useCallback(() => {
-    if (hasAutoSubmitted.current) return;
-    hasAutoSubmitted.current = true;
-    setSubmitting(true);
-    gradeAttempt(id!);
-    navigate(`/attempt/${id}/result`);
-  }, [id, navigate]);
-
+  // Resume the attempt on load.
   useEffect(() => {
-    if (isExpired && attempt?.status === 'active') doSubmit();
-  }, [isExpired, attempt?.status, doSubmit]);
-
-  if (!attempt || !exam || attempt.status !== 'active') {
-    if (attempt?.status === 'submitted') {
-      navigate(`/attempt/${id}/result`);
-      return null;
+    let on = true;
+    if (!token) {
+      setFatal('This attempt session has expired. Please start the exam again from the link.');
+      setLoading(false);
+      return;
     }
+    attemptsApi
+      .resume(id!, token)
+      .then(r => {
+        if (!on) return;
+        const status = r.status;
+        if (status.status !== 'active' || !r.can_resume) {
+          navigate(`/attempt/${id}/result`, { replace: true });
+          return;
+        }
+        setTitle(status.exam_title || '');
+        setDeadline(status.deadline_at);
+        setQuestions(r.questions || []);
+        const map: Record<string, LiveAnswer> = {};
+        (r.answers || []).forEach(a => {
+          if (a.answer_data) map[a.question_id] = { data: a.answer_data, is_correct: null };
+        });
+        setAnswers(map);
+        setCurrentIdx(0);
+      })
+      .catch(e => {
+        if (on) setFatal((e as { message?: string })?.message || 'Unable to resume this attempt.');
+      })
+      .finally(() => { if (on) setLoading(false); });
+    return () => { on = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, token]);
+
+  const { secondsLeft, isExpired, formatted } = useExamTimer(deadline);
+
+  const doSubmit = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setSaveError('');
+    try {
+      await attemptsApi.submit(id!, token);
+      navigate(`/attempt/${id}/result`, { replace: true });
+    } catch (e) {
+      const msg = (e as { message?: string })?.message || '';
+      // Already finalised (submitted/expired server-side) → show result.
+      if (/submit|expired|active/i.test(msg)) {
+        navigate(`/attempt/${id}/result`, { replace: true });
+      } else {
+        setSaveError(msg || 'Failed to submit. Please try again.');
+        setSubmitting(false);
+      }
+    }
+  }, [id, token, navigate, submitting]);
+
+  // Auto-submit when the server deadline is reached.
+  const autoFired = useRef(false);
+  useEffect(() => {
+    if (isExpired && !autoFired.current) {
+      autoFired.current = true;
+      doSubmit();
+    }
+  }, [isExpired, doSubmit]);
+
+  const handleAnswer = useCallback(async (questionId: string, data: AnswerData) => {
+    setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: null } }));
+    try {
+      const saved = await attemptsApi.saveAnswer(id!, questionId, token, data);
+      setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: saved.is_correct } }));
+    } catch (e) {
+      setSaveError((e as { message?: string })?.message || 'Failed to save your answer.');
+    }
+  }, [id, token]);
+
+  if (loading) return <LoadingSpinner className="min-h-[60vh]" />;
+
+  if (fatal) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
         <Logo size="md" className="mb-4" />
-        <p className="text-slate-500">This attempt is no longer available.</p>
+        <p className="text-slate-600 text-sm mb-3">{fatal}</p>
+        <button
+          onClick={() => navigate('/')}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700"
+        >
+          Go Home
+        </button>
       </div>
     );
   }
 
   const currentQ = questions[currentIdx];
-  const currentAnswer = answers.find(a => a.question_id === currentQ?.id);
-  const answeredIds = new Set(answers.filter(a => a.answer_data).map(a => a.question_id));
-
-  const handleAnswer = (data: AnswerData) => {
-    const saved = saveAnswer(attempt.id, currentQ.id, data);
-    setAnswers(getAnswersByAttempt(attempt.id));
-
-    // Immediate feedback
-    const result = gradeAnswer(currentQ, data);
-    setFeedbacks(prev => ({ ...prev, [currentQ.id]: result.is_correct }));
-  };
-
-  const handleSubmitConfirm = () => {
-    setSubmitConfirm(false);
-    doSubmit();
-  };
-
-  const isExpiredState = isExpired;
+  const answeredIds = new Set(Object.keys(answers));
+  const currentData = currentQ ? answers[currentQ.id]?.data : undefined;
+  const selectedOption =
+    currentData?.type === 'multiple_choice' ? currentData.selected_option_id : null;
+  const ordered = currentData?.type === 'ordering' ? currentData.token_ids : [];
+  const bracketValue = currentData?.type === 'correct_brackets' ? currentData.answer : '';
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-4 pb-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-4 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-slate-200 z-10">
         <div className="flex items-center gap-3">
           <Logo size="sm" />
           <div>
-            <div className="text-xs text-slate-500">{exam.title}</div>
-            <div className="text-sm font-semibold text-slate-800">
-              Q{currentIdx + 1} / {questions.length}
-            </div>
+            <div className="text-xs text-slate-500">{title}</div>
+            <div className="text-sm font-semibold text-slate-800">Q{currentIdx + 1} / {questions.length}</div>
           </div>
         </div>
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono font-bold text-sm ${
-          secondsLeft < 60 ? 'bg-red-100 text-red-700' :
-          secondsLeft < 300 ? 'bg-yellow-100 text-yellow-700' :
-          'bg-blue-50 text-blue-700'
+          secondsLeft < 60 ? 'bg-red-100 text-red-700' : secondsLeft < 300 ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-700'
         }`}>
-          <span>⏱</span>
-          <span>{formatted}</span>
+          <span>⏱</span><span>{formatted}</span>
         </div>
       </div>
 
-      {/* Question navigator */}
+      {saveError && (
+        <div className="mb-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{saveError}</div>
+      )}
+
       <div className="flex flex-wrap gap-1.5 mb-5">
         {questions.map((q, i) => (
           <button
@@ -331,14 +335,12 @@ export function ExamActivePage() {
         ))}
       </div>
 
-      {/* Question */}
       {currentQ && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-4">
           <div className="flex items-center justify-between mb-4">
             <div>
               <span className="text-xs text-slate-400 font-medium uppercase tracking-wide">
-                {currentQ.type === 'multiple_choice' ? 'Multiple Choice' :
-                 currentQ.type === 'ordering' ? 'Ordering' : 'Correct the Brackets'}
+                {currentQ.type === 'multiple_choice' ? 'Multiple Choice' : currentQ.type === 'ordering' ? 'Ordering' : 'Correct the Brackets'}
               </span>
               <p className="text-slate-800 font-semibold mt-1 text-base leading-snug">{currentQ.text}</p>
             </div>
@@ -348,59 +350,43 @@ export function ExamActivePage() {
           </div>
 
           {currentQ.type === 'multiple_choice' && (
-            <MCQAnswer question={currentQ} answer={currentAnswer} onAnswer={handleAnswer} disabled={isExpiredState} />
+            <MCQAnswer question={currentQ} selected={selectedOption} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
           )}
           {currentQ.type === 'ordering' && (
-            <OrderingAnswer question={currentQ} answer={currentAnswer} onAnswer={handleAnswer} disabled={isExpiredState} />
+            <OrderingAnswer question={currentQ} arranged={ordered} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
           )}
           {currentQ.type === 'correct_brackets' && (
-            <BracketsAnswer question={currentQ} answer={currentAnswer} onAnswer={handleAnswer} disabled={isExpiredState} />
+            <BracketsAnswer question={currentQ} value={bracketValue} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
           )}
 
-          {feedbacks[currentQ.id] !== undefined && (
-            <div className="mt-4">
-              <FeedbackBadge isCorrect={feedbacks[currentQ.id] ?? null} />
-            </div>
+          {answers[currentQ.id]?.is_correct !== undefined && (
+            <div className="mt-4"><FeedbackBadge isCorrect={answers[currentQ.id]?.is_correct ?? null} /></div>
           )}
         </div>
       )}
 
-      {/* Navigation */}
       <div className="flex items-center justify-between gap-3">
-        <button
-          onClick={() => setCurrentIdx(i => Math.max(0, i - 1))}
-          disabled={currentIdx === 0}
-          className="px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
-        >
+        <button onClick={() => setCurrentIdx(i => Math.max(0, i - 1))} disabled={currentIdx === 0}
+          className="px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors">
           ← Previous
         </button>
-
         {currentIdx < questions.length - 1 ? (
-          <button
-            onClick={() => setCurrentIdx(i => i + 1)}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
+          <button onClick={() => setCurrentIdx(i => i + 1)}
+            className="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors">
             Next →
           </button>
         ) : (
-          <button
-            onClick={() => setSubmitConfirm(true)}
-            disabled={submitting || isExpiredState}
-            className="px-5 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-60 transition-colors"
-          >
+          <button onClick={() => setSubmitConfirm(true)} disabled={submitting || isExpired}
+            className="px-5 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-60 transition-colors">
             {submitting ? 'Submitting…' : 'Submit Exam'}
           </button>
         )}
       </div>
 
-      {/* Submit from anywhere */}
       {currentIdx < questions.length - 1 && (
         <div className="mt-4 text-center">
-          <button
-            onClick={() => setSubmitConfirm(true)}
-            disabled={submitting}
-            className="text-sm text-slate-500 underline hover:text-red-600"
-          >
+          <button onClick={() => setSubmitConfirm(true)} disabled={submitting}
+            className="text-sm text-slate-500 underline hover:text-red-600">
             Submit exam now
           </button>
         </div>
@@ -412,7 +398,7 @@ export function ExamActivePage() {
         message={`You have answered ${answeredIds.size} of ${questions.length} questions. Are you sure you want to submit? You cannot change your answers after submission.`}
         confirmLabel="Submit Exam"
         cancelLabel="Continue"
-        onConfirm={handleSubmitConfirm}
+        onConfirm={() => { setSubmitConfirm(false); doSubmit(); }}
         onCancel={() => setSubmitConfirm(false)}
       />
     </div>

@@ -1,19 +1,34 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getSession } from '@/lib/auth';
-import {
-  getExamById, createExam, updateExam, publishExam, closeExam,
-  getQuestionsByExam, createQuestion, updateQuestion, deleteQuestion, reorderQuestions,
-} from '@/lib/db';
-import type { Exam, Question, MCQOption, OrderingToken, BracketItem, QuestionType } from '@/types';
+import { examsApi } from '@/lib/api/exams';
+import type {
+  Exam, Question, MCQOption, OrderingToken, BracketItem, QuestionType, ExamStatus,
+} from '@/types';
 import { ExamStatusBadge } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 const DURATION_PRESETS = [10, 20, 30, 45, 60];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function uid() { return Math.random().toString(36).slice(2, 10); }
+function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+
+function errMsg(e: unknown): string {
+  return (e as { message?: string })?.message || 'Something went wrong.';
+}
+
+function mcqDefaults(): Question['data'] {
+  return {
+    type: 'multiple_choice',
+    options: [
+      { id: uid(), text: '', order_index: 0, is_correct: true },
+      { id: uid(), text: '', order_index: 1, is_correct: false },
+      { id: uid(), text: '', order_index: 2, is_correct: false },
+      { id: uid(), text: '', order_index: 3, is_correct: false },
+    ],
+  };
+}
 
 // ─── Question type editors ───────────────────────────────────────────────────
 
@@ -205,7 +220,7 @@ function BracketsEditor({ question, onChange }: {
 // ─── Question card ────────────────────────────────────────────────────────────
 
 function QuestionCard({
-  question, index, total, onUpdate, onDelete, onMoveUp, onMoveDown
+  question, index, total, onUpdate, onDelete, onMoveUp, onMoveDown,
 }: {
   question: Question;
   index: number;
@@ -281,75 +296,49 @@ function QuestionCard({
 export function ExamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const teacher = getSession()!;
   const isNew = id === 'new';
 
-  const [exam, setExam] = useState<Partial<Exam>>(() =>
-    isNew ? { title: '', description: '', instructions: '', duration_minutes: 30, ranking_enabled: true, result_visibility: true, review_visibility: true }
-    : getExamById(id!) || {}
+  const [exam, setExam] = useState<Partial<Exam>>(
+    isNew
+      ? { title: '', description: '', instructions: '', duration_minutes: 30, ranking_enabled: true, result_visibility: true, review_visibility: true }
+      : {},
   );
-  const [questions, setQuestions] = useState<Question[]>(() =>
-    isNew ? [] : getQuestionsByExam(id!)
-  );
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [examStatus, setExamStatus] = useState<ExamStatus>('draft');
+  const [slug, setSlug] = useState('');
+  const [loading, setLoading] = useState(!isNew);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [publishConfirm, setPublishConfirm] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
 
-  const examObj = isNew ? null : getExamById(id!);
-  const examStatus = examObj?.status || 'draft';
-  const canEdit = examStatus === 'draft';
+  const canEdit = isNew || examStatus === 'draft';
 
-  const refresh = useCallback(() => {
-    if (!isNew) {
-      setQuestions(getQuestionsByExam(id!));
-    }
+  useEffect(() => {
+    if (isNew) return;
+    let on = true;
+    Promise.all([examsApi.get(id!), examsApi.questions(id!)])
+      .then(([e, qs]) => {
+        if (!on) return;
+        setExam(e);
+        setExamStatus(e.status);
+        setSlug(e.slug);
+        setQuestions(qs);
+      })
+      .catch(e => { if (on) setLoadError(errMsg(e)); })
+      .finally(() => { if (on) setLoading(false); });
+    return () => { on = false; };
   }, [id, isNew]);
 
-  const handleSaveExam = () => {
-    setSaving(true);
-    try {
-      if (isNew) {
-        const created = createExam(teacher.id, exam);
-        navigate(`/exams/${created.id}`, { replace: true });
-      } else {
-        updateExam(id!, exam);
-        // save questions
-        const existing = getQuestionsByExam(id!);
-        for (const q of questions) {
-          const found = existing.find(e => e.id === q.id);
-          if (found) updateQuestion(q.id, q);
-          else createQuestion(id!, q);
-        }
-        // delete removed
-        for (const eq of existing) {
-          if (!questions.find(q => q.id === eq.id)) deleteQuestion(eq.id);
-        }
-        const orderedIds = questions.map(q => q.id);
-        reorderQuestions(id!, orderedIds);
-        refresh();
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const addQuestion = (type: QuestionType) => {
-    const defaultData = type === 'multiple_choice'
-      ? { type: 'multiple_choice' as const, options: [
-          { id: uid(), text: '', order_index: 0, is_correct: true },
-          { id: uid(), text: '', order_index: 1, is_correct: false },
-          { id: uid(), text: '', order_index: 2, is_correct: false },
-          { id: uid(), text: '', order_index: 3, is_correct: false },
-        ]}
-      : type === 'ordering'
-      ? { type: 'ordering' as const, tokens: [] }
-      : { type: 'correct_brackets' as const, sentence: '', brackets: [] };
-
+    const defaultData = type === 'multiple_choice' ? mcqDefaults()
+      : type === 'ordering' ? { type: 'ordering' as const, tokens: [] as OrderingToken[] }
+      : { type: 'correct_brackets' as const, sentence: '', brackets: [] as BracketItem[] };
     const newQ: Question = {
       id: uid(),
-      exam_id: id || 'new',
+      exam_id: '',
       type,
       text: '',
       order_index: questions.length,
@@ -361,27 +350,121 @@ export function ExamDetailPage() {
     setQuestions(prev => [...prev, newQ]);
   };
 
+  const moveQuestion = (idx: number, dir: -1 | 1) => {
+    const newQs = [...questions];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= newQs.length) return;
+    [newQs[idx], newQs[swap]] = [newQs[swap], newQs[idx]];
+    setQuestions(newQs.map((q, i) => ({ ...q, order_index: i })));
+  };
+
   const validateForPublish = (): string[] => {
     const errs: string[] = [];
     if (!exam.title?.trim()) errs.push('Exam title is required.');
     if (!exam.duration_minutes || exam.duration_minutes <= 0) errs.push('Duration must be greater than 0.');
     if (questions.length === 0) errs.push('At least one question is required.');
     for (const q of questions) {
-      if (!q.text?.trim()) errs.push(`Question ${questions.indexOf(q) + 1}: Question text is required.`);
-      if (q.marks <= 0) errs.push(`Question ${questions.indexOf(q) + 1}: Marks must be > 0.`);
+      const n = questions.indexOf(q) + 1;
+      if (!q.text?.trim()) errs.push(`Question ${n}: Question text is required.`);
+      if (q.marks <= 0) errs.push(`Question ${n}: Marks must be > 0.`);
       if (q.type === 'multiple_choice' && q.data.type === 'multiple_choice') {
-        if (!q.data.options.some(o => o.is_correct)) errs.push(`Question ${questions.indexOf(q) + 1}: No correct answer selected.`);
-        if (q.data.options.some(o => !o.text.trim())) errs.push(`Question ${questions.indexOf(q) + 1}: All options need text.`);
+        if (!q.data.options.some(o => o.is_correct)) errs.push(`Question ${n}: No correct answer selected.`);
+        if (q.data.options.some(o => !o.text.trim())) errs.push(`Question ${n}: All options need text.`);
+        if (q.data.options.filter(o => o.is_correct).length !== 1) errs.push(`Question ${n}: Select exactly one correct answer.`);
       }
       if (q.type === 'ordering' && q.data.type === 'ordering' && q.data.tokens.length < 2) {
-        errs.push(`Question ${questions.indexOf(q) + 1}: Ordering requires at least 2 tokens.`);
+        errs.push(`Question ${n}: Ordering requires at least 2 tokens.`);
       }
       if (q.type === 'correct_brackets' && q.data.type === 'correct_brackets') {
-        if (!q.data.sentence.includes('(')) errs.push(`Question ${questions.indexOf(q) + 1}: Sentence must contain bracketed word, e.g. (go).`);
-        if (q.data.brackets.some(b => b.accepted_answers.length === 0)) errs.push(`Question ${questions.indexOf(q) + 1}: Accepted answers required.`);
+        if (!q.data.sentence.includes('(')) errs.push(`Question ${n}: Sentence must contain bracketed word, e.g. (go).`);
+        if (q.data.brackets.some(b => b.accepted_answers.length === 0)) errs.push(`Question ${n}: Accepted answers required.`);
       }
     }
     return errs;
+  };
+
+  /** Persist exam details + full question set (draft editing). Returns the saved exam. */
+  const persist = useCallback(async (): Promise<{ examId: string; slugStr: string }> => {
+    const fields = {
+      title: exam.title,
+      description: exam.description || '',
+      instructions: exam.instructions || '',
+      duration_minutes: exam.duration_minutes || 30,
+      ranking_enabled: exam.ranking_enabled,
+      result_visibility: exam.result_visibility,
+      review_visibility: exam.review_visibility,
+    };
+
+    let examId: string;
+    let savedSlug = slug;
+    if (isNew) {
+      const created = await examsApi.create(fields as Partial<Exam>);
+      examId = created.id;
+      savedSlug = created.slug;
+    } else {
+      const updated = await examsApi.update(id!, fields as Partial<Exam>);
+      examId = updated.id;
+      savedSlug = updated.slug;
+      // Replace existing questions with current local set (guarantees order).
+      const existing = await examsApi.questions(examId);
+      for (const q of existing) await examsApi.deleteQuestion(q.id);
+    }
+
+    const createdQs: Question[] = [];
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      createdQs.push(await examsApi.addQuestion(examId, {
+        type: q.type,
+        text: q.text,
+        marks: q.marks,
+        order_index: i,
+        data: q.data as unknown as Record<string, unknown>,
+      }));
+    }
+
+    setSlug(savedSlug);
+    if (!isNew) {
+      setQuestions(createdQs);
+      const fresh = await examsApi.get(examId);
+      setExamStatus(fresh.status);
+      setExam(fresh);
+    }
+    return { examId, slugStr: savedSlug };
+  }, [exam, questions, isNew, id, slug]);
+
+  const handleSaveExam = async () => {
+    if (saving) return;
+    setSaving(true);
+    setErrors([]);
+    try {
+      const { examId } = await persist();
+      if (isNew) {
+        navigate(`/exams/${examId}`, { replace: true });
+      }
+    } catch (e) {
+      setErrors([errMsg(e)]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmPublish = async () => {
+    if (saving) return;
+    setSaving(true);
+    setErrors([]);
+    try {
+      const { slugStr } = await persist();
+      const published = await examsApi.publish(id!);
+      const url = `${window.location.origin}/exam/${slugStr || published.slug}`;
+      setExamStatus(published.status);
+      setSlug(published.slug);
+      setShareUrl(url);
+    } catch (e) {
+      setErrors([errMsg(e)]);
+    } finally {
+      setSaving(false);
+      setPublishConfirm(false);
+    }
   };
 
   const handlePublish = () => {
@@ -391,34 +474,25 @@ export function ExamDetailPage() {
     setPublishConfirm(true);
   };
 
-  const confirmPublish = () => {
-    handleSaveExam();
-    if (!isNew) {
-      const updated = publishExam(id!);
-      if (updated) {
-        const url = `${window.location.origin}/exam/${updated.slug}`;
-        setShareUrl(url);
-      }
+  const confirmClose = async () => {
+    try {
+      await examsApi.close(id!);
+      const fresh = await examsApi.get(id!);
+      setExamStatus(fresh.status);
+    } catch (e) {
+      setErrors([errMsg(e)]);
+    } finally {
+      setCloseConfirm(false);
     }
-    setPublishConfirm(false);
   };
 
-  const confirmClose = () => {
-    closeExam(id!);
-    setCloseConfirm(false);
-    window.location.reload();
-  };
+  if (loading) return <LoadingSpinner className="py-20" />;
 
-  const moveQuestion = (idx: number, dir: -1 | 1) => {
-    const newQs = [...questions];
-    const swap = idx + dir;
-    if (swap < 0 || swap >= newQs.length) return;
-    [newQs[idx], newQs[swap]] = [newQs[swap], newQs[idx]];
-    setQuestions(newQs.map((q, i) => ({ ...q, order_index: i })));
-  };
+  if (!isNew && loadError) {
+    return <div className="p-8 text-center text-slate-500">{loadError}</div>;
+  }
 
-  const currentExam = !isNew ? getExamById(id!) : null;
-  const slug = currentExam?.slug || '';
+  const displayTitle = exam.title || 'Untitled';
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -426,7 +500,7 @@ export function ExamDetailPage() {
       <div className="flex items-center gap-2 text-sm text-slate-500 mb-6">
         <Link to="/exams" className="hover:text-blue-600">Exams</Link>
         <span>/</span>
-        <span className="text-slate-700 font-medium">{isNew ? 'New Exam' : (exam.title || 'Untitled')}</span>
+        <span className="text-slate-700 font-medium">{isNew ? 'New Exam' : displayTitle}</span>
         {!isNew && <ExamStatusBadge status={examStatus} />}
       </div>
 
@@ -477,7 +551,7 @@ export function ExamDetailPage() {
 
       {errors.length > 0 && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl">
-          <p className="text-red-700 font-medium mb-2">Please fix the following before publishing:</p>
+          <p className="text-red-700 font-medium mb-2">Please fix the following:</p>
           <ul className="text-sm text-red-600 space-y-1 list-disc list-inside">
             {errors.map((e, i) => <li key={i}>{e}</li>)}
           </ul>
@@ -494,7 +568,7 @@ export function ExamDetailPage() {
             type="text"
             value={exam.title || ''}
             onChange={e => setExam(x => ({ ...x, title: e.target.value }))}
-            disabled={!canEdit && !isNew}
+            disabled={!canEdit}
             placeholder="e.g. English Grammar Test"
             className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
           />
@@ -506,7 +580,7 @@ export function ExamDetailPage() {
             rows={2}
             value={exam.description || ''}
             onChange={e => setExam(x => ({ ...x, description: e.target.value }))}
-            disabled={!canEdit && !isNew}
+            disabled={!canEdit}
             placeholder="Brief description of the exam"
             className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 resize-none"
           />
@@ -518,7 +592,7 @@ export function ExamDetailPage() {
             rows={3}
             value={exam.instructions || ''}
             onChange={e => setExam(x => ({ ...x, instructions: e.target.value }))}
-            disabled={!canEdit && !isNew}
+            disabled={!canEdit}
             placeholder="Read each question carefully..."
             className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 resize-none"
           />
@@ -531,7 +605,7 @@ export function ExamDetailPage() {
               <button
                 key={d}
                 onClick={() => setExam(x => ({ ...x, duration_minutes: d }))}
-                disabled={!canEdit && !isNew}
+                disabled={!canEdit}
                 className={`px-3 py-1.5 rounded-xl text-sm font-medium border transition-colors disabled:opacity-40 ${
                   exam.duration_minutes === d
                     ? 'bg-blue-600 text-white border-blue-600'
@@ -547,7 +621,7 @@ export function ExamDetailPage() {
               max={180}
               value={exam.duration_minutes || ''}
               onChange={e => setExam(x => ({ ...x, duration_minutes: parseInt(e.target.value) || 0 }))}
-              disabled={!canEdit && !isNew}
+              disabled={!canEdit}
               placeholder="Custom"
               className="w-20 px-3 py-1.5 rounded-xl border border-slate-200 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50"
             />
@@ -565,7 +639,7 @@ export function ExamDetailPage() {
                 type="checkbox"
                 checked={!!exam[field]}
                 onChange={e => setExam(x => ({ ...x, [field]: e.target.checked }))}
-                disabled={!canEdit && !isNew}
+                disabled={!canEdit}
                 className="w-4 h-4 accent-blue-600"
               />
               <span className="text-sm text-slate-700">{label}</span>
@@ -575,7 +649,7 @@ export function ExamDetailPage() {
       </div>
 
       {/* Questions */}
-      {(!isNew || questions.length > 0) && (
+      {questions.length > 0 && (
         <div className="mb-6">
           <h2 className="font-semibold text-slate-800 mb-3">Questions ({questions.length})</h2>
           <div className="space-y-4">
@@ -596,7 +670,7 @@ export function ExamDetailPage() {
       )}
 
       {/* Add question buttons */}
-      {(canEdit || isNew) && (
+      {canEdit && (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-5 mb-6">
           <p className="text-sm font-medium text-slate-600 mb-3">Add a question</p>
           <div className="flex gap-2 flex-wrap">
@@ -615,7 +689,7 @@ export function ExamDetailPage() {
 
       {/* Action buttons */}
       <div className="flex gap-3 flex-wrap">
-        {(canEdit || isNew) && (
+        {canEdit && (
           <button
             onClick={handleSaveExam}
             disabled={saving}
@@ -624,7 +698,7 @@ export function ExamDetailPage() {
             {saving ? 'Saving…' : isNew ? 'Create Exam' : 'Save Changes'}
           </button>
         )}
-        {!isNew && canEdit && (
+        {!isNew && canEdit && questions.length > 0 && (
           <button
             onClick={handlePublish}
             className="px-5 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition-colors"

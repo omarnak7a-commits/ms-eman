@@ -6,13 +6,13 @@ export function useAuth() {
   const [teacher, setTeacher] = useState<Teacher | null>(() => getSession());
 
   const login = useCallback(async (email: string, password: string) => {
-    const t = authLogin(email, password);
+    const t = await authLogin(email, password);
     setTeacher(t);
     return t;
   }, []);
 
-  const logout = useCallback(() => {
-    authLogout();
+  const logout = useCallback(async () => {
+    await authLogout();
     setTeacher(null);
   }, []);
 

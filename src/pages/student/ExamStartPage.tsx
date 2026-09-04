@@ -1,65 +1,62 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
-import { getExamBySlug, getQuestionsByExam, findOrCreateStudent, createAttempt } from '@/lib/db';
+import { attemptsApi, setAttemptToken, type ExamPublicInfo } from '@/lib/api/attempts';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 export function ExamStartPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const [info, setInfo] = useState<ExamPublicInfo | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [loadingInfo, setLoadingInfo] = useState(true);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
 
-  const exam = getExamBySlug(slug!);
-  const questions = exam ? getQuestionsByExam(exam.id) : [];
-
-  if (!exam) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-        <Logo size="md" className="mb-6" />
-        <h1 className="text-xl font-bold text-slate-800 mb-2">Exam Not Found</h1>
-        <p className="text-slate-500 text-sm">This exam link is invalid or has been removed.</p>
-      </div>
-    );
-  }
-
-  if (exam.status === 'draft') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-        <Logo size="md" className="mb-6" />
-        <h1 className="text-xl font-bold text-slate-800 mb-2">Exam Not Available</h1>
-        <p className="text-slate-500 text-sm">This exam has not been published yet.</p>
-      </div>
-    );
-  }
-
-  if (exam.status === 'closed') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-        <Logo size="md" className="mb-6" />
-        <h1 className="text-xl font-bold text-slate-800 mb-2">Exam Closed</h1>
-        <p className="text-slate-500 text-sm">This exam is no longer accepting submissions.</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let on = true;
+    attemptsApi
+      .examInfo(slug!)
+      .then(d => { if (on) setInfo(d); })
+      .catch(e => { if (on) setLoadError((e as { message?: string })?.message || 'Exam not available.'); })
+      .finally(() => { if (on) setLoadingInfo(false); });
+    return () => { on = false; };
+  }, [slug]);
 
   const handleStart = async (e: FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed || trimmed.length < 2) { setError('Please enter your full name (at least 2 characters).'); return; }
     setError('');
-    setLoading(true);
+    setStarting(true);
     try {
-      const student = findOrCreateStudent(trimmed);
-      const attempt = createAttempt(exam.id, student.id);
-      navigate(`/attempt/${attempt.id}`);
+      const attempt = await attemptsApi.start(slug!, trimmed);
+      setAttemptToken(attempt.attempt_id, attempt.student_token);
+      navigate(`/attempt/${attempt.attempt_id}`, { replace: true });
     } catch (err) {
-      setError('Failed to start exam. Please try again.');
-      setLoading(false);
+      setError((err as { message?: string })?.message || 'Failed to start exam. Please try again.');
+      setStarting(false);
     }
   };
 
-  const totalMarks = questions.reduce((s, q) => s + q.marks, 0);
+  if (loadingInfo) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  if (!info) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
+        <Logo size="md" className="mb-6" />
+        <h1 className="text-xl font-bold text-slate-800 mb-2">Exam Not Available</h1>
+        <p className="text-slate-500 text-sm">{loadError || 'This exam link is invalid, closed, or has been removed.'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-md mx-auto px-4 py-8">
@@ -69,30 +66,30 @@ export function ExamStartPage() {
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
         <div className="bg-blue-600 px-6 py-5 text-white text-center">
-          <h1 className="text-xl font-bold">{exam.title}</h1>
-          {exam.description && <p className="text-blue-100 text-sm mt-1">{exam.description}</p>}
+          <h1 className="text-xl font-bold">{info.title}</h1>
+          {info.description && <p className="text-blue-100 text-sm mt-1">{info.description}</p>}
         </div>
 
         <div className="px-6 py-5">
           <div className="flex justify-around text-center mb-5 pb-5 border-b border-slate-100">
             <div>
-              <div className="text-xl font-bold text-slate-800">{questions.length}</div>
+              <div className="text-xl font-bold text-slate-800">{info.question_count}</div>
               <div className="text-xs text-slate-500 mt-0.5">Questions</div>
             </div>
             <div>
-              <div className="text-xl font-bold text-slate-800">{exam.duration_minutes}</div>
+              <div className="text-xl font-bold text-slate-800">{info.duration_minutes}</div>
               <div className="text-xs text-slate-500 mt-0.5">Minutes</div>
             </div>
             <div>
-              <div className="text-xl font-bold text-slate-800">{totalMarks}</div>
+              <div className="text-xl font-bold text-slate-800">{info.max_score}</div>
               <div className="text-xs text-slate-500 mt-0.5">Total marks</div>
             </div>
           </div>
 
-          {exam.instructions && (
+          {info.instructions && (
             <div className="mb-5">
               <h2 className="text-sm font-semibold text-slate-700 mb-2">Instructions</h2>
-              <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{exam.instructions}</p>
+              <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{info.instructions}</p>
             </div>
           )}
 
@@ -116,10 +113,10 @@ export function ExamStartPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={starting}
               className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors text-base"
             >
-              {loading ? 'Starting…' : 'Start Exam'}
+              {starting ? 'Starting…' : 'Start Exam'}
             </button>
           </form>
         </div>

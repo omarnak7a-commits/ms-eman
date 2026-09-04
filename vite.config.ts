@@ -33,7 +33,21 @@ export default defineConfig(({ mode }) => {
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
+      // Allow the platform's dynamic preview hostnames (e.g. <port>-<sandbox>.e2b.app)
+      // in addition to localhost, so the live preview is not blocked.
+      allowedHosts: true,
       watch: { ignored: ['**/.figma/**'] },
+      // In local/dev preview, proxy API requests to the FastAPI backend so the
+      // browser talks to a single origin. Point VITE_API_URL at a real deployed
+      // backend in production instead.
+      proxy: process.env.VITE_API_URL
+        ? {}
+        : {
+            '/api': {
+              target: process.env.TY_BACKEND_URL || 'http://localhost:8000',
+              changeOrigin: true,
+            },
+          },
     },
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',

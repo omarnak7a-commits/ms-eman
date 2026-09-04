@@ -1,40 +1,41 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSession, logout } from '@/lib/auth';
-import { getTeachers, hashPassword } from '@/lib/db';
+import { changePassword } from '@/lib/api/auth';
 
 export function SettingsPage() {
-  const teacher = getSession()!;
+  const teacher = getSession();
   const navigate = useNavigate();
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
     if (!currentPw || !newPw || !confirmPw) { setMsg({ type: 'error', text: 'All fields are required.' }); return; }
     if (newPw !== confirmPw) { setMsg({ type: 'error', text: 'New passwords do not match.' }); return; }
-    if (newPw.length < 6) { setMsg({ type: 'error', text: 'Password must be at least 6 characters.' }); return; }
-
-    const { checkPassword } = require('@/lib/db');
-    if (!checkPassword(currentPw, teacher.password_hash)) {
-      setMsg({ type: 'error', text: 'Current password is incorrect.' });
-      return;
+    if (newPw.length < 8) { setMsg({ type: 'error', text: 'Password must be at least 8 characters.' }); return; }
+    setBusy(true);
+    try {
+      await changePassword(currentPw, newPw);
+      setMsg({ type: 'success', text: 'Password changed. Please sign in again.' });
+      setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      setTimeout(async () => {
+        await logout();
+        navigate('/login');
+      }, 1200);
+    } catch (err) {
+      setMsg({ type: 'error', text: (err as { message?: string })?.message || 'Failed to change password.' });
+    } finally {
+      setBusy(false);
     }
-
-    const teachers = getTeachers();
-    const updated = teachers.map(t =>
-      t.id === teacher.id ? { ...t, password_hash: hashPassword(newPw) } : t
-    );
-    localStorage.setItem('ty_teachers', JSON.stringify(updated));
-    setMsg({ type: 'success', text: 'Password changed. Please sign in again.' });
-    setTimeout(() => { logout(); navigate('/login'); }, 1500);
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
@@ -47,15 +48,15 @@ export function SettingsPage() {
         <div className="space-y-2 text-sm">
           <div className="flex gap-3">
             <span className="text-slate-500 w-20">Name</span>
-            <span className="text-slate-800 font-medium">{teacher.name}</span>
+            <span className="text-slate-800 font-medium">{teacher?.name}</span>
           </div>
           <div className="flex gap-3">
             <span className="text-slate-500 w-20">Email</span>
-            <span className="text-slate-800">{teacher.email}</span>
+            <span className="text-slate-800">{teacher?.email}</span>
           </div>
           <div className="flex gap-3">
             <span className="text-slate-500 w-20">Role</span>
-            <span className="capitalize text-slate-800">{teacher.role}</span>
+            <span className="capitalize text-slate-800">{teacher?.role}</span>
           </div>
         </div>
       </div>
@@ -83,7 +84,7 @@ export function SettingsPage() {
               />
             </div>
           ))}
-          <button type="submit" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700">
+          <button type="submit" disabled={busy} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-60">
             Update Password
           </button>
         </form>

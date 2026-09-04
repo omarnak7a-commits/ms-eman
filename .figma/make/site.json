@@ -1,0 +1,11 @@
+{
+  "title": "Test Yourself — Ms Eman Zahy",
+  "description": "Online English examination platform for Ms Eman Zahy. Take tests, review answers, and check the leaderboard.",
+  "language": "en",
+  "robots": {
+    "index": true
+  },
+  "accessibility": {
+    "addBypassLinks": true
+  }
+}

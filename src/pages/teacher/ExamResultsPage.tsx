@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getExamById, getAttemptsByExam, getStudentById } from '@/lib/db';
-import { AttemptStatusBadge } from '@/components/StatusBadge';
+import { resultsApi, type ResultAttemptRow } from '@/lib/api/results';
+import { examsApi } from '@/lib/api/exams';
+import { useAsync } from '@/hooks/useAsync';
 import { EmptyState } from '@/components/EmptyState';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -15,37 +17,44 @@ export function ExamResultsPage() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'rank' | 'score' | 'time' | 'name'>('rank');
 
-  const exam = getExamById(id!);
-  const allAttempts = useMemo(() => getAttemptsByExam(id!), [id]);
-  const submitted = allAttempts.filter(a => a.status === 'submitted');
+  const { data: exam, loading: examLoading, error: examError } = useAsync(
+    () => examsApi.get(id!),
+    [id],
+  );
+  const { data: res, loading, error } = useAsync(
+    () => resultsApi.examResults(id!),
+    [id],
+  );
+
+  const finished = useMemo(
+    () => (res?.attempts || []).filter(a => a.status === 'submitted' || a.status === 'expired'),
+    [res],
+  );
 
   const stats = useMemo(() => {
-    if (submitted.length === 0) return null;
-    const scores = submitted.map(a => a.percentage);
+    if (finished.length === 0) return null;
     return {
-      avg: Math.round(scores.reduce((s, v) => s + v, 0) / scores.length),
-      highest: Math.max(...scores),
-      lowest: Math.min(...scores),
+      avg: Math.round(res!.summary.average_percentage),
+      highest: Math.round(res!.summary.highest_percentage),
+      lowest: Math.round(res!.summary.lowest_percentage),
     };
-  }, [submitted]);
+  }, [finished, res]);
 
   const filtered = useMemo(() => {
     const term = search.toLowerCase();
-    return submitted
-      .filter(a => {
-        const student = getStudentById(a.student_id);
-        return !term || student?.name.toLowerCase().includes(term) || student?.normalized_name.includes(term);
-      })
-      .sort((a, b) => {
-        if (sortBy === 'rank') return (a.rank ?? 999) - (b.rank ?? 999);
-        if (sortBy === 'score') return b.percentage - a.percentage;
-        if (sortBy === 'time') return a.time_used_seconds - b.time_used_seconds;
-        const na = getStudentById(a.student_id)?.name || '';
-        const nb = getStudentById(b.student_id)?.name || '';
-        return na.localeCompare(nb);
-      });
-  }, [submitted, search, sortBy]);
+    const rows = finished.filter(a => !term || a.student_name.toLowerCase().includes(term));
+    return rows.sort((a, b) => {
+      if (sortBy === 'rank') return (a.rank ?? 999) - (b.rank ?? 999);
+      if (sortBy === 'score') return b.percentage - a.percentage;
+      if (sortBy === 'time') return a.time_used_seconds - b.time_used_seconds;
+      return a.student_name.localeCompare(b.student_name);
+    });
+  }, [finished, search, sortBy]);
 
+  if (examLoading || (loading && !res)) return <LoadingSpinner className="py-20" />;
+  if (examError || error) {
+    return <div className="p-8 text-center text-slate-500">{examError || error}</div>;
+  }
   if (!exam) return <div className="p-8 text-center text-slate-500">Exam not found.</div>;
 
   return (
@@ -59,7 +68,9 @@ export function ExamResultsPage() {
       </div>
 
       <h1 className="text-2xl font-bold text-slate-800 mb-1">{exam.title}</h1>
-      <p className="text-slate-500 text-sm mb-6">{allAttempts.length} total attempts · {submitted.length} completed</p>
+      <p className="text-slate-500 text-sm mb-6">
+        {res?.summary.total_attempts ?? 0} total attempts · {res?.summary.completed_attempts ?? 0} completed
+      </p>
 
       {stats && (
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -114,30 +125,27 @@ export function ExamResultsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.map(attempt => {
-                  const student = getStudentById(attempt.student_id);
-                  return (
-                    <tr key={attempt.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 font-bold text-slate-600">{attempt.rank ?? '—'}</td>
-                      <td className="px-5 py-3 font-medium text-slate-800">{student?.name || '—'}</td>
-                      <td className="px-5 py-3 text-slate-700">{attempt.score}/{attempt.max_score}</td>
-                      <td className="px-5 py-3">
-                        <span className={`font-semibold ${attempt.percentage >= 80 ? 'text-green-600' : attempt.percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-                          {attempt.percentage}%
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-slate-500 hidden sm:table-cell">{formatTime(attempt.time_used_seconds)}</td>
-                      <td className="px-5 py-3 text-slate-500 hidden md:table-cell">
-                        {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Link to={`/exams/${id}/results/${attempt.id}`} className="text-blue-600 text-xs hover:text-blue-700 font-medium">
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filtered.map((attempt: ResultAttemptRow) => (
+                  <tr key={attempt.attempt_id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3 font-bold text-slate-600">{attempt.rank ?? '—'}</td>
+                    <td className="px-5 py-3 font-medium text-slate-800">{attempt.student_name || '—'}</td>
+                    <td className="px-5 py-3 text-slate-700">{attempt.score}/{attempt.max_score}</td>
+                    <td className="px-5 py-3">
+                      <span className={`font-semibold ${attempt.percentage >= 80 ? 'text-green-600' : attempt.percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {attempt.percentage}%
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-slate-500 hidden sm:table-cell">{formatTime(attempt.time_used_seconds)}</td>
+                    <td className="px-5 py-3 text-slate-500 hidden md:table-cell">
+                      {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-5 py-3">
+                      <Link to={`/exams/${id}/results/${attempt.attempt_id}`} className="text-blue-600 text-xs hover:text-blue-700 font-medium">
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

@@ -25,7 +25,7 @@ export function LoginPage() {
       await login(email, password);
       navigate('/dashboard');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Login failed.');
+      setError((err as { message?: string })?.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -86,9 +86,13 @@ export function LoginPage() {
           </form>
 
           <div className="mt-4 p-3 bg-slate-50 rounded-xl">
-            <p className="text-xs text-slate-500 font-medium mb-1">Demo credentials</p>
-            <p className="text-xs text-slate-600">ms.eman.zahy@test.com</p>
-            <p className="text-xs text-slate-600">password123</p>
+            <p className="text-xs text-slate-500 font-medium mb-1">Teacher account</p>
+            <p className="text-xs text-slate-600">
+              Sign in with the account your administrator created for you.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Development seed (if enabled): ms.eman.zahy@test.com
+            </p>
           </div>
         </div>
       </div>
