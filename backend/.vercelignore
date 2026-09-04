@@ -1,0 +1,13 @@
+# Keep the Vercel serverless function small and free of local junk.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov
+dev.db
+*.sqlite3
+*.db
+.env
+.pytest_cache/
+tests/

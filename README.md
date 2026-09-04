@@ -51,7 +51,7 @@ server-graded results, review and a leaderboard.
     │   ├── services/       # business logic (auth, exam, grading, attempt, …)
     │   └── api/            # auth / teacher / student routers
     ├── alembic/            # migrations (PostgreSQL)
-    ├── tests/              # pytest suite (35 tests)
+    ├── tests/              # pytest suite (39 tests)
     ├── requirements.txt
     └── .env.example
 ```
@@ -199,6 +199,10 @@ VITE_API_URL=https://YOUR-BACKEND-ORIGIN/api
 ---
 
 ## Deployment
+
+> 📦 **الرفع على Vercel + Supabase فقط (عربي، خطوة بخطوة):**
+> [`DEPLOY_VERCEL_SUPABASE.md`](./DEPLOY_VERCEL_SUPABASE.md). The summary below
+> covers the pieces.
 
 ### Backend (FastAPI + PostgreSQL)
 

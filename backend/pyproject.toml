@@ -1,0 +1,4 @@
+[tool.vercel]
+# Tell Vercel's Python runtime exactly where the FastAPI `app` instance lives.
+# index.py at this (backend) deployment root re-exports app.main:app.
+entrypoint = "index:app"

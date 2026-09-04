@@ -1,0 +1,162 @@
+# 🚀 نشر التطبيق على Vercel + Supabase فقط
+
+> الدليل الكامل بالعربي. المعمارية: **مشروعين على Vercel** (واحد للواجهة وواحد
+> للباك إند FastAPI) + **Supabase كقاعدة بيانات PostgreSQL**. مفيش أي خدمة تالتة.
+
+## مخطط النشر
+
+```
+جهازك (مرة واحدة)            Vercel (مشروع 1)               Vercel (مشروع 2)
+───────────────────          ───────────────────            ───────────────────
+alembic upgrade              الواجهة React (Vite)           الباك إند FastAPI
+python -m app.create_admin   root directory = /             root directory = /backend
+         │
+         ▼
+Supabase (PostgreSQL مُدارة)  └──── https://<ui>.vercel.app ┘──► https://<api>.vercel.app
+```
+
+- الواجهة بتتكلم مع الباك إند عن طريق متغيّر `VITE_API_URL`.
+- الباك إند شغال كـ **serverless function** من Vercel (Python runtime) — يناسبنا
+  لأن طلباتنا قصيرة (تسجيل/حفظ/تسليم) ومفيش WebSocket ولا عمليات طويلة.
+- **الـ migrations مش بتتعمل على Vercel** — بتتعمل مرة واحدة من جهازك على قاعدة
+  Supabase قبل ما ترفع.
+
+---
+
+## الخطوة 1 — تجهيز قاعدة Supabase (قاعدة بيانات فقط)
+
+1. ادخل على [supabase.com](https://supabase.com) → **New project**.
+   - اكتب اسم (مثل `ms-eman`) واختار **Password** قوي (حفظه في مكان آمن) ومنطقة
+     قريبة (مثل `Frankfurt`).
+2. استنى الداتابيز تخلص إنشاء (دقيقتين تقريبًا).
+3. روح على **Settings → Database → Connection string → URI**.
+   - اختار **Session pooler** أو **Transaction pooler** (موصى به للـ serverless،
+     بورت `6543`).
+   - هيوصلك رابط شكله:
+     ```
+     postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+     ```
+4. **حوّله للشكل اللي التطبيق بيقريه** — استبدل أول `postgresql://` بـ
+   `postgresql+psycopg2://`:
+   ```
+   postgresql+psycopg2://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+   ```
+   دي قيمة `DATABASE_URL`. لو في رموز خاصة في الباسورد (زي `@` أو `:` أو `#`)،
+   لازم تـ encode لها (مثلاً `@` → `%40`).
+
+---
+
+## الخطوة 2 — إنشاء الجداول + حساب المعلم (من جهازك، مرة واحدة)
+
+من مجلد `backend/` على جهازك، مع تفعيل البيئة:
+
+```bash
+cd backend
+# مثبّت المتطلبات
+pip install -r requirements.txt
+
+# 1) تشغيل الـ migrations على قاعدة Supabase
+export DATABASE_URL="postgresql+psycopg2://postgres.<ref>:<password>@...pooler.supabase.com:6543/postgres"
+alembic upgrade head
+
+# 2) إنشاء حساب المعلم (أول مرة)
+export ADMIN_EMAIL="you@example.com"
+export ADMIN_PASSWORD="ضع-كلمة-مرور-قوية-طويلة"
+export ADMIN_NAME="Ms Eman Zahy"
+python -m app.create_admin
+```
+
+> `app.create_admin` آمن للاستخدام في الإنتاج (كلمة المرور إنت بتحددها وبتتحقّق
+> أنها ≥ 8 أحرف). **مفيش أي حساب تجريبي بكلمة ضعيفة في الإنتاج.**
+> بعد إنشاء حسابك تقدر تغيّر كلمة السر في أي وقت من صفحة **Settings** داخل التطبيق.
+
+### على ويندوز (PowerShell)
+```powershell
+$env:DATABASE_URL="postgresql+psycopg2://postgres.<ref>:<password>@...:6543/postgres"
+alembic upgrade head
+$env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="..."; $env:ADMIN_NAME="Ms Eman Zahy"
+python -m app.create_admin
+```
+
+---
+
+## الخطوة 3 — رفع الباك إند على Vercel (مشروع 1)
+
+1. اتأكد إن الكود الجاهز مترفوع على فرع من GitHub (هنا `arena/01a06e1a-ms-eman`).
+2. افتح [vercel.com/new](https://vercel.com/new) → استورد ريبو `ms-eman`.
+3. في شاشة الإعدادات، **مهم**:
+   - **Root Directory**: `backend`
+   - **Framework Preset**: Python (FastAPI) — Vercel بيلاقي `app` في `backend/index.py`
+     تلقائيًا (الملف ده اتعمل لهذا الغرض).
+   - **Production Branch**: `arena/01a06e1a-ms-eman` (أو الفرع اللي فيه الكود الجاهز).
+4. ضيف **Environment Variables**:
+
+   | المتغير | القيمة |
+   |---------|--------|
+   | `DATABASE_URL` | رابط Supabase المحوّل (من الخطوة 1) |
+   | `SECRET_KEY` | توليد: `openssl rand -hex 32` (احفظه) |
+   | `ENVIRONMENT` | `production` |
+   | `DEBUG` | `false` |
+   | `CORS_ORIGINS` | قائمة JSON بكل روابط الواجهة، مثال: `["https://your-ui.vercel.app"]` |
+
+5. اضغط **Deploy**. بعد ما يخلص خد **الرابط بتاع الـ API** (شكله
+   `https://your-api-xxxx.vercel.app`).
+
+> جرّب إن الباك إند شغال: افتح `https://your-api-xxxx.vercel.app/healthz` — المفروض
+> يرجّع `{"status":"ok",...}`.
+
+---
+
+## الخطوة 4 — رفع الواجهة على Vercel (مشروع 2)
+
+1. **New Project** تاني → استورد نفس الريبو `ms-eman`.
+2. الإعدادات:
+   - **Root Directory**: `/` (الجذر — فيه `package.json`)
+   - **Framework Preset**: Vite
+   - **Production Branch**: `arena/01a06e1a-ms-eman`
+3. ضيف **Environment Variable**:
+
+   | المتغير | القيمة |
+   |---------|--------|
+   | `VITE_API_URL` | `https://your-api-xxxx.vercel.app/api` (رابط الباك إند + `/api`) |
+
+4. اضغط **Deploy**. هتاخد رابط زي `https://your-ui-xxxx.vercel.app`.
+
+---
+
+## الخطوة 5 — تشغيل التطبيق 🎉
+
+1. افتح `https://your-ui-xxxx.vercel.app`.
+2. سجّل الدخول بالإيميل وكلمة السر اللي عملتهم في الخطوة 2.
+3. أنشئ امتحان (أو اعمل نسخة من النموذج)، انشره، وافتح رابطه كطالب.
+
+---
+
+## تحديثات بعد النشر (روتين عادي)
+
+لو غيّرت كود الباك إند **وعايز تغيّر شكل قاعدة البيانات**:
+1. اعمل migration جديد من جهازك:
+   ```bash
+   alembic revision --autogenerate -m "change"
+   alembic upgrade head   # ضد DATABASE_URL بتاعة Supabase
+   ```
+2. ارفع الكود — Vercel هيتحدّث تلقائيًا (مفيش حاجة للمخططات لأنه معمول قبلها).
+
+لو غيّرت كود بس من غير تغيير في القاعدة، مجرد الـ push بيشغّل deploy جديد.
+
+---
+
+## الأسئلة الشائعة / الملاحظات
+
+- **ليه مشروعين؟** الواجهة (static SPA) والباك إند (Python serverless) كل واحد
+  محتاج إعدادات Build مختلفة و Root Directory مختلفة، فبنفصلهم في مشروعين على
+  نفس الريبو.
+- **في ناس بتلاقي أن Python على Vercel "beta"**: ينفع لكن بيحتاج إعادة محاولة
+  ساعات أول مرة (cold start بياخد ثانية). لو حسّيت إنه مش ثابت معاك بشكل مزعج،
+  أسهل بديل يفضل مع Supabase: شغّل نفس الباك إند على منصّة **Render** (مجاني) بنفس
+  `DATABASE_URL` وبس — الواجهة تفضل على Vercel. أنا أجهّزلك الخطوات لو حابب.
+- **الـ seed (ms.eman.zahy@test.com)** هو للـ development بس وبيعلن يرفض يشتغل في
+  `ENVIRONMENT=production`. للرفع الحقيقي استخدم `app.create_admin` من فوق.
+- **كلمة سر Supabase**: لو فيها رموز خاصة، انسخ الرابط من لوحة Supabase وعدّل
+  الـ scheme والـ encode بعناية، وخلّيه في Environment Variables (مش في ملف `.env`
+  مترفوع).
