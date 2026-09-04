@@ -59,6 +59,9 @@ class AnswerOut(BaseModel):
     attempt_id: str
     question_id: str
     answer_data: dict[str, Any]
+    # Present only for immediate correct/incorrect feedback during the attempt.
+    # It never reveals the correct answer itself.
+    is_correct: bool | None = None
     answered_at: datetime
     updated_at: datetime
 

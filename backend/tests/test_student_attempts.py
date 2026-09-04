@@ -99,6 +99,22 @@ def test_start_strips_correct_answers(client, teacher):
         assert "accepted_answers" not in brk
 
 
+def test_autosave_returns_immediate_correctness(client, teacher):
+    exam = make_published_exam(client, teacher)
+    data = start(client, exam["slug"], "Sara")
+    aid = data["attempt_id"]
+    h = attempt_headers(data)
+    qmap = {q["type"]: q["id"] for q in data["questions"]}
+    r = client.put(f"/api/attempts/{aid}/answers/{qmap['multiple_choice']}",
+                   json={"answer_data": correct_answers()["multiple_choice"]}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is True
+    r2 = client.put(f"/api/attempts/{aid}/answers/{qmap['multiple_choice']}",
+                    json={"answer_data": {"type": "multiple_choice", "selected_option_id": "o2"}}, headers=h)
+    assert r2.status_code == 200
+    assert r2.json()["is_correct"] is False
+
+
 def test_full_correct_submission(client, teacher):
     exam = make_published_exam(client, teacher)
     data = start(client, exam["slug"], "Sara")

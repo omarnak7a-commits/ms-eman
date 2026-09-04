@@ -225,10 +225,21 @@ class AttemptService:
             answer_data=validated,
             answered_at=now,
         )
+        # Server-graded immediate feedback (Correct/Incorrect only).
+        outcome = grade_question(question, validated)
+        answer.is_correct = outcome.is_correct
+        answer.awarded_marks = outcome.awarded_marks
+        self.db.flush()
         self.db.commit()
-        return {"id": answer.id, "attempt_id": answer.attempt_id, "question_id": answer.question_id,
-                "answer_data": answer.answer_data, "answered_at": answer.answered_at,
-                "updated_at": answer.updated_at}
+        return {
+            "id": answer.id,
+            "attempt_id": answer.attempt_id,
+            "question_id": answer.question_id,
+            "answer_data": answer.answer_data,
+            "is_correct": answer.is_correct,
+            "answered_at": answer.answered_at,
+            "updated_at": answer.updated_at,
+        }
 
     def _validate_answer_data(self, question: Question, answer_data: dict) -> dict:
         """Basic structural validation without grading (client sends their pick)."""
