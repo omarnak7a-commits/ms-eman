@@ -22,6 +22,7 @@ import { RankingPage } from '@/pages/student/RankingPage';
 
 // Components
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
@@ -63,8 +64,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
