@@ -200,8 +200,8 @@ VITE_API_URL=https://YOUR-BACKEND-ORIGIN/api
 
 ## Deployment
 
-> 📦 **الرفع على Vercel + Supabase فقط (عربي، خطوة بخطوة):**
-> [`DEPLOY_VERCEL_SUPABASE.md`](./DEPLOY_VERCEL_SUPABASE.md). The summary below
+> 📦 **الرفع على Vercel + Neon (قاعدة مجانية دائمة بلا كارت، عربي خطوة بخطوة):**
+> [`DEPLOY_VERCEL_NEON.md`](./DEPLOY_VERCEL_NEON.md). The summary below
 > covers the pieces.
 
 ### Backend (FastAPI + PostgreSQL)
