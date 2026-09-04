@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     jwt_issuer: str = "test-yourself"
     jwt_audience: str = "test-yourself-api"
 
+    # Optional built-frontend directory served by the app in production so the
+    # whole product runs on ONE origin (single-project deploy). Leave empty to
+    # use the default repo-root `dist/` and disable entirely outside production.
+    frontend_dist: str = ""
+
     # CORS
     cors_origins: List[str] = Field(
         default_factory=lambda: [
