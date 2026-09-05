@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="<!-- figma:lang -->">
+  <head>
+    <!-- figma:head-start -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><!-- figma:title --></title>
+    <!-- figma:head-end -->
+    <script>
+      /*
+       * Boot watchdog — deliberately a CLASSIC (non-module) ES5 script so it
+       * still runs on browsers that cannot even parse the application bundle.
+       *
+       * It exists so a startup failure is *diagnosable* instead of showing a
+       * silent white screen: it reports a missing/failed JS or CSS asset (the
+       * stale-index.html failure mode), a bundle syntax error on an old mobile
+       * engine, and any uncaught error thrown before React mounts.
+       *
+       * It never swallows anything: errors still propagate to the console, and
+       * the notice only appears when #root is genuinely still empty.
+       */
+      (function () {
+        var problems = [];
+        var shown = false;
+
+        function record(message) {
+          if (message && problems.indexOf(message) === -1) problems.push(message);
+        }
+
+        function booted() {
+          var root = document.getElementById('root');
+          return !!(root && root.firstChild);
+        }
+
+        function show() {
+          if (shown || booted()) return;
+          shown = true;
+          var root = document.getElementById('root');
+          if (!root) {
+            root = document.createElement('div');
+            root.id = 'root';
+            document.body.appendChild(root);
+          }
+          var detail = problems.length ? problems.join('\n') : 'The application did not start.';
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
+            'background:#f8fafc;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a">' +
+            '<div style="max-width:32rem;width:100%;background:#fff;border:1px solid #fecaca;border-radius:16px;padding:24px">' +
+            '<h1 style="margin:0 0 8px;font-size:17px;font-weight:600;color:#b91c1c">The app could not start</h1>' +
+            '<p style="margin:0 0 12px;color:#475569">Please reload the page. If it keeps happening, close the tab and open the link again.</p>' +
+            '<pre id="ty-boot-detail" style="margin:0 0 16px;white-space:pre-wrap;word-break:break-word;font-size:12px;' +
+            'background:#fef2f2;border:1px solid #fee2e2;border-radius:10px;padding:12px;color:#334155"></pre>' +
+            '<button id="ty-boot-reload" style="padding:8px 16px;border:0;border-radius:12px;background:#2563eb;color:#fff;' +
+            'font-size:14px;font-weight:500">Reload</button>' +
+            '</div></div>';
+          var pre = document.getElementById('ty-boot-detail');
+          if (pre) pre.textContent = detail;
+          var btn = document.getElementById('ty-boot-reload');
+          if (btn) {
+            btn.onclick = function () {
+              window.location.reload();
+            };
+          }
+        }
+
+        // Failed <script>/<link>/<img> downloads do not bubble: listen in the
+        // capture phase. This is what catches an index.html that points at an
+        // asset hash which no longer exists on the server.
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event.target;
+            if (target && target !== window && target.tagName) {
+              var url = target.src || target.href;
+              if (url) {
+                record('Failed to load ' + target.tagName.toLowerCase() + ': ' + url);
+                setTimeout(show, 0);
+                return;
+              }
+            }
+            record(event.message || String(event.error || 'Unknown script error'));
+            setTimeout(show, 0);
+          },
+          true,
+        );
+
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason;
+          record('Unhandled promise rejection: ' + ((reason && reason.message) || String(reason)));
+        });
+
+        // Last resort: nothing rendered a while after load.
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            if (!booted()) {
+              record('The application bundle loaded but nothing was rendered.');
+              show();
+            }
+          }, 8000);
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- figma:body-start -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- figma:body-end -->
+  </body>
+</html>

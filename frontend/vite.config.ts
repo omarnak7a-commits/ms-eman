@@ -13,9 +13,16 @@ export default defineConfig(({ mode }) => {
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
     build: {
+      // Pin the output syntax level instead of inheriting Vite's moving
+      // default (`baseline-widely-available`, currently Safari 16). Students
+      // open exam links on whatever phone they own, so the bundle must parse
+      // on older iOS/Android engines — a syntax error in the entry module is
+      // an instant white screen with nothing in the UI to explain it.
+      target: ['es2020', 'chrome87', 'edge88', 'firefox78', 'safari14'],
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
     },
+
     plugins: [
       react(),
       tailwindcss(),

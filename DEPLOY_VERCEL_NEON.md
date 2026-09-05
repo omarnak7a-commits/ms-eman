@@ -1,7 +1,8 @@
 # 🚀 نشر التطبيق على Vercel + Neon (بديل Supabase المجاني الدائم)
 
-> الدليل الكامل بالعربي. المعمارية: **مشروعين على Vercel** (واحد للواجهة وواحد
-> للباك إند FastAPI) + **Neon كقاعدة PostgreSQL سيرفرليس** — بديل Supabase.
+> الدليل الكامل بالعربي. المعمارية: **مشروع واحد على Vercel** — Vercel بيبني
+> واجهة `frontend/` ويقدّم `frontend/dist` كـ static، و`/api/*` بتروح لدالة
+> FastAPI في `api/index.py` — + **Neon كقاعدة PostgreSQL سيرفرليس** بديل Supabase.
 >
 > ✅ **Neon**: مجاني دائم، **من غير كارت بنك**، scale-to-zero (مش بتحاسبك وقت
 > الخمول)، ومفيش إيقاف تلقائي بعد أسبوع زي Supabase المجاني.
@@ -92,15 +93,30 @@ python -m app.create_admin
 
 ---
 
-## الخطوة 3 — رفع الباك إند على Vercel (مشروع 1)
+## الخطوة 3 — رفع المشروع كله على Vercel (مشروع واحد)
 
-1. اتأكد إن الكود الجاهز مترفوع على فرع من GitHub (هنا `arena/01a06e1a-ms-eman`).
+المعمارية الحالية زي `whatsapp-exam-bot` بالظبط: **Vercel هو اللي يبني الواجهة**،
+وبيقدّم `frontend/dist` كملفات static، و`/api/*` بس هي اللي بتروح لـ FastAPI.
+مفيش أي `dist` متسجّل في Git.
+
+1. اتأكد إن الكود مترفوع على GitHub.
 2. افتح [vercel.com/new](https://vercel.com/new) → استورد ريبو `ms-eman`.
-3. في شاشة الإعدادات، **مهم**:
-   - **Root Directory**: `backend`
-   - **Framework Preset**: Python (FastAPI) — Vercel بيلاقي `app` في `backend/index.py`
-     تلقائيًا (الملف ده اتعمل لهذا الغرض).
-   - **Production Branch**: `arena/01a06e1a-ms-eman` (أو الفرع اللي فيه الكود الجاهز).
+3. الإعدادات:
+   - **Root Directory**: `/` (الجذر — فيه `vercel.json` و `api/` و `frontend/`)
+   - **Framework Preset**: `Other` — سيب `vercel.json` هو اللي يتحكّم:
+     ```json
+     {
+       "buildCommand": "cd frontend && npm install && npm run build",
+       "outputDirectory": "frontend/dist",
+       "installCommand": "cd frontend && npm install",
+       "rewrites": [
+         { "source": "/api/(.*)", "destination": "/api/index.py" },
+         { "source": "/healthz",  "destination": "/api/index.py" },
+         { "source": "/(.*)",     "destination": "/index.html" }
+       ]
+     }
+     ```
+   - متحطّش أي Build/Output Settings يدوي — الملف كفاية.
 4. ضيف **Environment Variables**:
 
    | المتغير | القيمة |
@@ -109,30 +125,42 @@ python -m app.create_admin
    | `SECRET_KEY` | توليد: `openssl rand -hex 32` (احفظه) |
    | `ENVIRONMENT` | `production` |
    | `DEBUG` | `false` |
-   | `CORS_ORIGINS` | قائمة JSON بكل روابط الواجهة، مثال: `["https://your-ui.vercel.app"]` |
+   | `CORS_ORIGINS` | قائمة JSON بدومين الموقع، مثال: `["https://your-app.vercel.app"]` |
 
-5. اضغط **Deploy**. بعد ما يخلص خد **الرابط بتاع الـ API** (شكله
-   `https://your-api-xxxx.vercel.app`).
+   > **مش محتاج `VITE_API_URL`** — الواجهة بتنادي `/api/...` على نفس الدومين.
+   > حطّه فقط لو الـ API على دومين تاني. وممنوع تحط أي أسرار (مفاتيح/كلمات سر)
+   > في متغيرات `VITE_*` لأنها بتتحط جوه ملفات الجافاسكريبت العامة.
 
-> جرّب إن الباك إند شغال: افتح `https://your-api-xxxx.vercel.app/healthz` — المفروض
-> يرجّع `{"status":"ok",...}`.
+5. اضغط **Deploy**.
 
 ---
 
-## الخطوة 4 — رفع الواجهة على Vercel (مشروع 2)
+## الخطوة 4 — التأكد بعد الرفع
 
-1. **New Project** تاني → استورد نفس الريبو `ms-eman`.
-2. الإعدادات:
-   - **Root Directory**: `/` (الجذر — فيه `package.json`)
-   - **Framework Preset**: Vite
-   - **Production Branch**: `arena/01a06e1a-ms-eman`
-3. ضيف **Environment Variable**:
+بعد ما الـ deploy يخلص، افتح الروابط دي وتأكد من الأكواد:
 
-   | المتغير | القيمة |
-   |---------|--------|
-   | `VITE_API_URL` | `https://your-api-xxxx.vercel.app/api` (رابط الباك إند + `/api`) |
+| الرابط | المتوقع |
+|--------|---------|
+| `https://<domain>/healthz` | `{"status":"ok",...}` |
+| `https://<domain>/` | صفحة HTML 200 |
+| `https://<domain>/login` | HTML 200 (مش 404) |
+| `https://<domain>/exam/<slug>` | HTML 200 حتى لو فتحته مباشرة من الموبايل |
+| `https://<domain>/assets/index-XXXX.js` | 200 (الهاش اللي في `index.html`) |
+| `https://<domain>/assets/index-XXXX.css` | 200 |
 
-4. اضغط **Deploy**. هتاخد رابط زي `https://your-ui-xxxx.vercel.app`.
+من الطرفية:
+
+```bash
+D=https://your-app.vercel.app
+curl -s -o /dev/null -w "%{http_code}\n" $D/healthz
+curl -s $D/ | grep -oE '/assets/[^"]+' | while read a; do
+  echo "$a -> $(curl -s -o /dev/null -w '%{http_code}' $D$a)"
+done
+```
+
+كل ملفات `/assets/*` لازم ترجّع **200**. لو رجّع 404 يبقى في `index.html` قديم
+متخزّن في كاش المتصفح — اعمل reload بعد ما الـ deploy يخلص (الملف بيتقدّم بـ
+`cache-control: max-age=0, must-revalidate` فالمشكلة دي مفروض مبقتش تحصل).
 
 ---
 
@@ -160,9 +188,13 @@ python -m app.create_admin
 
 ## الأسئلة الشائعة / الملاحظات
 
-- **ليه مشروعين؟** الواجهة (static SPA) والباك إند (Python serverless) كل واحد
-  محتاج إعدادات Build مختلفة و Root Directory مختلفة، فبنفصلهم في مشروعين على
-  نفس الريبو.
+- **ليه مشروع واحد؟** `vercel.json` بيخلّي Vercel يبني الواجهة بنفسه ويقدّمها من
+  الـ CDN، ويوجّه `/api/*` بس لدالة Python. كده مفيش دومينين، مفيش CORS، ومفيش
+  `dist` متسجّل في Git يقدر يبقى قديم ويسبب صفحة بيضا على الموبايل.
+- **ليه شيلنا `dist/` من Git؟** لأن `index.html` بيشاور على ملفات باسم فيه هاش
+  (`/assets/index-XXXX.js`). لو الـ HTML اتسجّل في Git من غير الملفات الجديدة،
+  المتصفح بياخد HTML 200 وJS/CSS 404 → React عمره ما يشتغل → صفحة بيضا. دلوقتي
+  Vercel بيبني الاتنين مع بعض في نفس الـ deploy فالحالة دي مستحيلة.
 - **هل Neon هيبقى في سيرفر قريب؟** اختار أقرب منطقة لجمهورك (مصر غالبًا
   `eu-central-1` / Frankfurt). مش هيبقى فرق محسوس مع تطبيقنا الصغير.
 - **في ناس بتلاقي أن Python على Vercel "beta"**: ينفع لكن بيحتاج إعادة محاولة

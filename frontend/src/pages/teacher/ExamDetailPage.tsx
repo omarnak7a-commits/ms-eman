@@ -8,6 +8,7 @@ import { ExamStatusBadge } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { FIXED_QUESTION_HEADERS } from '@/lib/questionPrompt';
+import { copyToClipboard } from '@/lib/clipboard';
 
 const DURATION_PRESETS = [10, 20, 30, 45, 60];
 
@@ -573,14 +574,14 @@ export function ExamDetailPage() {
           <p className="text-green-700 text-sm mb-3 break-all">{shareUrl}</p>
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() => { navigator.clipboard.writeText(shareUrl); }}
+              onClick={() => { void copyToClipboard(shareUrl); }}
               className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700"
             >
               Copy Link
             </button>
-            {navigator.share && (
+            {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
               <button
-                onClick={() => navigator.share({ url: shareUrl, title: exam.title })}
+                onClick={() => { void navigator.share({ url: shareUrl, title: exam.title }).catch(() => copyToClipboard(shareUrl)); }}
                 className="px-3 py-1.5 bg-white border border-green-300 text-green-700 rounded-xl text-sm font-medium hover:bg-green-50"
               >
                 Share
@@ -597,7 +598,7 @@ export function ExamDetailPage() {
           <p className="text-blue-700 text-sm mb-2 break-all">{window.location.origin}/exam/{slug}</p>
           <div className="flex gap-2">
             <button
-              onClick={() => navigator.clipboard.writeText(`${window.location.origin}/exam/${slug}`)}
+              onClick={() => { void copyToClipboard(`${window.location.origin}/exam/${slug}`); }}
               className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-sm hover:bg-blue-700"
             >
               Copy Link

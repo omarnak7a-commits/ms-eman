@@ -1,15 +1,10 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "includeFiles": ["dist/**"]
-      }
-    }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "api/index.py" }
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "cd frontend && npm install",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
+    { "source": "/healthz", "destination": "/api/index.py" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

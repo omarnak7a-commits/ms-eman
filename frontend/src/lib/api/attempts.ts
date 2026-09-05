@@ -1,5 +1,6 @@
 import type { AnswerData } from '@/types';
 import { request } from './client';
+import { storageGet, storageSet } from '@/lib/storage';
 
 // ── Student attempt token store ─────────────────────────────────────────────
 // The attempt token authorizes all calls for a given attempt (resume, autosave,
@@ -9,10 +10,10 @@ function tokenKey(attemptId: string): string {
   return `ty_attempt_${attemptId}`;
 }
 export function getAttemptToken(attemptId: string): string | null {
-  return localStorage.getItem(tokenKey(attemptId));
+  return storageGet(tokenKey(attemptId));
 }
 export function setAttemptToken(attemptId: string, token: string): void {
-  localStorage.setItem(tokenKey(attemptId), token);
+  storageSet(tokenKey(attemptId), token);
 }
 
 export interface StudentOption {

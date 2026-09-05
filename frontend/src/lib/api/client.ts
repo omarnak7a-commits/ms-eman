@@ -2,6 +2,8 @@
  * API client + auth token store for the Test Yourself FastAPI backend.
  */
 
+import { storageGet, storageRemove, storageSet } from '@/lib/storage';
+
 export interface ApiError {
   status: number;
   code?: string;
@@ -16,18 +18,18 @@ const ACCESS_KEY = 'ty_api_access';
 const REFRESH_KEY = 'ty_api_refresh';
 
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY);
+  return storageGet(ACCESS_KEY);
 }
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
+  return storageGet(REFRESH_KEY);
 }
 export function setTokens(access: string, refresh: string): void {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
+  storageSet(ACCESS_KEY, access);
+  storageSet(REFRESH_KEY, refresh);
 }
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  storageRemove(ACCESS_KEY);
+  storageRemove(REFRESH_KEY);
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -52,7 +54,7 @@ export async function refreshAccessToken(): Promise<boolean> {
       method: 'POST',
       body: { refresh_token: refresh },
     });
-    localStorage.setItem(ACCESS_KEY, data.access_token);
+    storageSet(ACCESS_KEY, data.access_token);
     return true;
   } catch {
     clearTokens();

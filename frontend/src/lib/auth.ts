@@ -6,12 +6,13 @@
 import type { Teacher } from '@/types';
 import { login as apiLogin, logout as apiLogout } from './api/auth';
 import { getAccessToken } from './api/client';
+import { storageGet, storageRemove, storageSet } from './storage';
 
 const CACHE_KEY = 'ty_teacher';
 
 function readCache(): Teacher | null {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = storageGet(CACHE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as Teacher;
   } catch {
@@ -30,7 +31,7 @@ export function hasAccessToken(): boolean {
 
 export async function login(email: string, password: string): Promise<Teacher> {
   const teacher = await apiLogin(email, password);
-  localStorage.setItem(CACHE_KEY, JSON.stringify(teacher));
+  storageSet(CACHE_KEY, JSON.stringify(teacher));
   return teacher;
 }
 
@@ -38,10 +39,10 @@ export async function logout(): Promise<void> {
   try {
     await apiLogout();
   } finally {
-    localStorage.removeItem(CACHE_KEY);
+    storageRemove(CACHE_KEY);
   }
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(CACHE_KEY);
+  storageRemove(CACHE_KEY);
 }
