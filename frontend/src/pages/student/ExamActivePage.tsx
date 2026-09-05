@@ -287,6 +287,7 @@ export function ExamActivePage() {
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, AnswerEntry>>({});
   const [deadline, setDeadline] = useState<string | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [submitConfirm, setSubmitConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -312,6 +313,11 @@ export function ExamActivePage() {
         }
         setTitle(status.exam_title || '');
         setDeadline(status.deadline_at);
+        // Server-authoritative remaining time seeds the countdown so phones
+        // never depend on engine-specific date parsing alone.
+        setRemainingSeconds(
+          typeof status.remaining_seconds === 'number' ? status.remaining_seconds : null,
+        );
         setQuestions(r.questions || []);
         // Answers already stored on the server were submitted before a refresh,
         // so restore them as locked with their grading feedback.
@@ -330,7 +336,7 @@ export function ExamActivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
-  const { secondsLeft, isExpired, formatted } = useExamTimer(deadline);
+  const { secondsLeft, isExpired, formatted } = useExamTimer(deadline, remainingSeconds);
 
   const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;

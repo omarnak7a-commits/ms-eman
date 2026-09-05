@@ -18,7 +18,7 @@ from ..core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from ..core.timeutil import ensure_utc
+from ..core.timeutil import ensure_utc, iso_utc_z
 from ..models.base import utcnow
 from ..models import Answer, Exam, ExamAttempt, Question
 from ..repositories import attempt_repo, exam_repo, question_repo, student_repo
@@ -111,14 +111,19 @@ class AttemptService:
         payload = [
             student_payload(q) for q in questions
         ]
+        duration_seconds = exam.duration_minutes * 60
         return StartAttemptResponse(
             attempt_id=attempt.id,
             exam_id=exam.id,
             exam_slug=exam.slug,
             status=attempt.status,
             started_at=started,
-            deadline_at=deadline,
-            duration_seconds=exam.duration_minutes * 60,
+            # Canonical UTC "Z" string (mobile-engine-safe, see iso_utc_z) and
+            # the server-computed remaining time so phones never need to
+            # guess the deadline from a locale/engine-dependent date parse.
+            deadline_at=iso_utc_z(deadline) or "",
+            remaining_seconds=duration_seconds,
+            duration_seconds=duration_seconds,
             student_token=token,
             questions=payload,
         )
@@ -186,12 +191,21 @@ class AttemptService:
         can_resume = (
             attempt.status == "active" and (deadline is not None and deadline > now)
         )
+        # Server-authoritative remaining seconds at response time; the client
+        # seeds its countdown from this and only re-derives from the deadline
+        # string (canonical UTC "Z") to stay correct across tab-suspends.
+        remaining = (
+            max(0, int((deadline - now).total_seconds()))
+            if attempt.status == "active" and deadline is not None
+            else 0
+        )
         return {
             "id": attempt.id,
             "exam_id": attempt.exam_id,
             "status": attempt.status,
             "started_at": attempt.started_at,
-            "deadline_at": attempt.deadline_at,
+            "deadline_at": iso_utc_z(attempt.deadline_at),
+            "remaining_seconds": remaining,
             "submitted_at": attempt.submitted_at,
             "can_resume": can_resume,
             "student_name": attempt.student.name if attempt.student else None,

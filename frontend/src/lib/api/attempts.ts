@@ -60,7 +60,10 @@ export interface StartedAttempt {
   exam_slug: string;
   status: string;
   started_at: string;
+  /** Canonical ISO-8601 UTC ("Z") — safe to parse on every mobile engine. */
   deadline_at: string;
+  /** Server-authoritative remaining seconds at response time. */
+  remaining_seconds?: number;
   duration_seconds: number;
   student_token: string;
   questions: StudentQuestion[];
@@ -104,7 +107,10 @@ export interface AttemptStatusData {
   exam_id: string;
   status: string;
   started_at: string;
+  /** Canonical ISO-8601 UTC ("Z") — safe to parse on every mobile engine. */
   deadline_at: string;
+  /** Server-authoritative remaining seconds at response time. */
+  remaining_seconds?: number;
   submitted_at: string | null;
   can_resume: boolean;
   student_name: string | null;
