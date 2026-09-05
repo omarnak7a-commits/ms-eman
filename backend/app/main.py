@@ -6,10 +6,18 @@ Run locally:
 Production deployments should run migrations with `alembic upgrade head`
 before starting the server, then run this module against PostgreSQL.
 
-In ``ENVIRONMENT=production`` the app also serves the built frontend (the Vite
-``dist`` folder) so the whole application runs as a SINGLE service on one
-origin/domain. That folder is set by ``FRONTEND_DIST`` (default: the repo root's
-``dist/``). This lets one Vercel project host both the React UI and the API.
+In ``ENVIRONMENT=production`` the app can ALSO serve the built frontend (the
+Vite ``frontend/dist`` folder) so a self-hosted/docker deployment runs as a
+SINGLE service on one origin/domain. That folder is set by ``FRONTEND_DIST``
+(default: the repo's ``frontend/dist``).
+
+On Vercel this fallback is normally unused: `vercel.json` makes Vercel build
+``frontend/`` and serve ``frontend/dist`` from its static CDN, rewriting only
+``/api/*`` and ``/healthz`` to this application. That is deliberate — serving
+the SPA shell from the CDN gives ``index.html`` the correct
+``cache-control: public, max-age=0, must-revalidate`` semantics, which is what
+prevents browsers (mobile ones in particular) from pinning a stale
+``index.html`` that points at asset hashes which no longer exist.
 """
 from __future__ import annotations
 
@@ -39,11 +47,24 @@ def _frontend_dist() -> Path | None:
     if not settings.is_production:
         return None
     if settings.frontend_dist:
-        p = Path(settings.frontend_dist)
+        candidates = [Path(settings.frontend_dist)]
     else:
-        # Default: repo-root/dist (one level above the backend package).
-        p = Path(__file__).resolve().parents[2] / "dist"
-    return p if p.is_dir() else None
+        # Default: <repo root>/frontend/dist (two levels above the app package).
+        # The legacy repo-root `dist/` is kept as a fallback for old checkouts.
+        root = Path(__file__).resolve().parents[2]
+        candidates = [root / "frontend" / "dist", root / "dist"]
+    for p in candidates:
+        if (p / "index.html").is_file():
+            return p
+    return None
+
+
+# The SPA shell must never be cached without revalidation: its <script> tag
+# points at a content-hashed bundle that disappears on the next deploy. A
+# heuristically cached index.html is exactly what turns a new deploy into a
+# blank page (HTML 200 + JS/CSS 404) on browsers that are hard to hard-refresh.
+_HTML_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
 
 
 def _mount_frontend(app: FastAPI) -> None:
@@ -69,7 +90,7 @@ def _mount_frontend(app: FastAPI) -> None:
                 return FileResponse(candidate)
         index = dist / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(index, headers=_HTML_NO_CACHE)
         return JSONResponse(
             status_code=404,
             content={"code": "not_found", "message": "Not found", "detail": "Not found"},

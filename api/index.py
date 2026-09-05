@@ -1,26 +1,23 @@
-"""Vercel entrypoint for the SINGLE-project deployment.
+"""Vercel serverless-function entrypoint for the FastAPI backend.
 
-The whole application runs as ONE service on one origin: this Python function
-is the full FastAPI app, which serves both the REST API (under /api and the
-student routes) and the prebuilt React UI (from the committed `dist/` folder).
-See backend/app/main.py `_mount_frontend`.
+Architecture (mirrors the proven `whatsapp-exam-bot` layout):
 
-The `app` package lives under `backend/`, which is the sibling of the `api/`
-folder, so we add the repo root's `backend/` to the import path regardless of
-the process working directory.
+* Vercel BUILDS the React/Vite frontend (`cd frontend && npm run build`) and
+  serves the generated `frontend/dist` as static assets from its CDN.
+* Only `/api/*` (and `/healthz`) are rewritten to this Python function.
+* Everything else falls back to the statically generated `/index.html`, which
+  is what makes React Router's client-side routes work on a hard reload.
+
+This module does NOT create a second FastAPI application: it re-exports the
+existing instance from `backend/app/main.py` so every route, dependency and
+middleware stays exactly the same.
 """
-from __future__ import annotations
-
+import os
 import sys
-from pathlib import Path
 
-# This file is <project_root>/api/index.py, so the backend package dir is
-# <project_root>/backend. Resolve it robustly (no assumption about cwd).
-_HERE = Path(__file__).resolve().parent          # <project_root>/api
-_BACKEND = _HERE.parent / "backend"              # <project_root>/backend
-for _p in (_BACKEND, _HERE.parent):              # also expose repo root
-    _s = str(_p)
-    if _s not in sys.path:
-        sys.path.insert(0, _s)
+# This file is <project_root>/api/index.py, so the package root that contains
+# `app/` is <project_root>/backend. Add it to sys.path so `from app.main import
+# app` resolves regardless of the process working directory.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
 
-from app.main import app  # noqa: E402,F401
+from app.main import app  # noqa: E402, F401

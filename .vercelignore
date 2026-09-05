@@ -1,7 +1,11 @@
-# Keep the single-project Python function lean.
+# Files that never need to be uploaded to Vercel.
+# NOTE: `frontend/` (source, package.json, vite.config.ts, index.html) MUST be
+# uploaded — Vercel runs `cd frontend && npm install && npm run build`.
 node_modules/
+frontend/node_modules/
+frontend/dist/
 backend/.venv/
-backend/dev.db
+.venv/
 *.db
 *.sqlite3
 .env

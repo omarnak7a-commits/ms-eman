@@ -1,11 +1,14 @@
 # Dependencies
 node_modules/
 
-# Build output
-# NOTE: `dist/` is intentionally committed because the Vercel Python
-# deployment serves the prebuilt frontend bundle from the repository.
+# Build output — NEVER commit the built frontend.
+# Vercel builds `frontend/` itself (see vercel.json `buildCommand`), so a
+# committed bundle can only go stale and serve an index.html that points at
+# asset hashes which no longer exist (the mobile white-screen failure mode).
+dist/
 build/
 coverage/
+.vite/
 
 # Logs
 *.log
@@ -20,7 +23,15 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.venv/
+venv/
+*.db
+*.sqlite3
 
 # Environment files (never commit secrets)
 .env
+.env.*
 !.env.example
+
+# Local scratch / reports
+TECHNICAL_REPORT.md

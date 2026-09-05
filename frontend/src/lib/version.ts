@@ -5,4 +5,4 @@
  * in any commit that changes runtime behavior, then check it in the browser
  * console / sources.
  */
-export const APP_BUILD = 'student-ranking-system-2026-09-05';
+export const APP_BUILD = 'vercel-frontend-build-migration-2026-09-05';
