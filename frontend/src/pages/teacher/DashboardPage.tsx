@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getSession } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 import { dashboardApi } from '@/lib/api/dashboard';
 import { useAsync } from '@/hooks/useAsync';
 import { ExamStatusBadge } from '@/components/StatusBadge';
@@ -20,7 +20,7 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 }
 
 export function DashboardPage() {
-  const teacher = getSession();
+  const { teacher } = useAuth();
   const { data: stats, loading, error } = useAsync(() => dashboardApi.summary(), []);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 

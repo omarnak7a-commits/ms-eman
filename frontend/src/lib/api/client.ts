@@ -46,19 +46,76 @@ async function parseError(res: Response): Promise<ApiError> {
   return { status: res.status, code, message };
 }
 
-export async function refreshAccessToken(): Promise<boolean> {
+// Refresh tokens are ROTATED server-side: every successful refresh revokes the
+// presented token and returns a fresh one. Both tokens must therefore be
+// persisted on every refresh, otherwise the next refresh attempt presents an
+// already-revoked token and the teacher's session dies mid-work.
+
+/** Single-flight guard: parallel 401s must trigger ONE refresh, not N
+ * competing ones (rotation would revoke the token under the other callers). */
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = doRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
   try {
-    const data = await rawFetch<{ access_token: string }>('/auth/refresh', {
-      method: 'POST',
-      body: { refresh_token: refresh },
-    });
+    const data = await rawFetch<{ access_token: string; refresh_token?: string }>(
+      '/auth/refresh',
+      {
+        method: 'POST',
+        body: { refresh_token: refresh },
+      },
+    );
+    if (typeof data?.access_token !== 'string' || !data.access_token) {
+      clearTokens();
+      return false;
+    }
     storageSet(ACCESS_KEY, data.access_token);
+    if (typeof data.refresh_token === 'string' && data.refresh_token) {
+      storageSet(REFRESH_KEY, data.refresh_token);
+    }
     return true;
   } catch {
     clearTokens();
     return false;
+  }
+}
+
+// ── Teacher session invalidation ─────────────────────────────────────────────
+// When a teacher 401 cannot be recovered via refresh, the stale client state
+// (cached profile + shared auth store) must be torn down too — otherwise
+// ProtectedRoute keeps rendering teacher pages that only ever say
+// "Authentication required". Registered listeners (the shared auth store in
+// useAuth) clear the cached profile and reset to signed-out, which makes the
+// router redirect to /login. Listeners must stay side-effect-light (no
+// network calls) so this can never start a request loop.
+
+export type SessionInvalidatedListener = () => void;
+const sessionInvalidatedListeners = new Set<SessionInvalidatedListener>();
+
+export function onTeacherSessionInvalidated(listener: SessionInvalidatedListener): () => void {
+  sessionInvalidatedListeners.add(listener);
+  return () => {
+    sessionInvalidatedListeners.delete(listener);
+  };
+}
+
+export function invalidateTeacherSession(): void {
+  clearTokens();
+  for (const listener of [...sessionInvalidatedListeners]) {
+    try {
+      listener();
+    } catch {
+      /* a broken listener must never block session recovery */
+    }
   }
 }
 
@@ -92,17 +149,31 @@ async function rawFetch<T>(path: string, opts: Options): Promise<T> {
 
 export async function request<T>(path: string, opts: Options = {}): Promise<T> {
   const isTeacher = opts.auth !== 'student' && opts.auth !== null;
+  let err: unknown;
   try {
     return await rawFetch<T>(path, opts);
-  } catch (err) {
-    // Teacher token may have expired → refresh once and retry.
-    if (isTeacher && (err as ApiError)?.status === 401 && getRefreshToken()) {
-      const ok = await refreshAccessToken();
-      if (ok) {
-        return await rawFetch<T>(path, opts);
-      }
-      clearTokens();
-    }
-    throw err;
+  } catch (e) {
+    if (!isTeacher || (e as ApiError)?.status !== 401) throw e;
+    err = e;
   }
+
+  // Teacher request was rejected (expired/invalid access token or no token at
+  // all). Attempt ONE refresh-and-retry when a refresh token exists.
+  if (getRefreshToken()) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      try {
+        return await rawFetch<T>(path, opts);
+      } catch (retryErr) {
+        if ((retryErr as ApiError)?.status !== 401) throw retryErr;
+        err = retryErr; // fall through → the session is unrecoverable
+      }
+    }
+  }
+
+  // The session cannot be restored: clear the tokens AND notify the shared
+  // auth store so the cached profile is dropped and the teacher is routed to
+  // /login instead of being stuck on a protected page.
+  invalidateTeacherSession();
+  throw err;
 }

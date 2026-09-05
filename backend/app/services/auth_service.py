@@ -71,6 +71,9 @@ class AuthService:
         self.db.commit()
         return TokenRefreshResponse(
             access_token=access_token,
+            # Hand the rotated refresh token back to the client; the one it
+            # presented was just revoked and must never be reused.
+            refresh_token=raw_new_refresh,
             expires_in=settings.access_token_expire_minutes * 60,
         )
 

@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
-import { getSession } from '@/lib/auth';
-import { logout } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: '⊞' },
@@ -14,11 +13,16 @@ const navItems = [
 
 export function TeacherLayout() {
   const navigate = useNavigate();
-  const teacher = getSession();
+  // Read the teacher from the SHARED auth store (not raw storage) so a
+  // session invalidation updates the layout too, and route logout through the
+  // store so signing out resets isAuthenticated for every consumer at once —
+  // otherwise LoginPage still believes the teacher is signed in and bounces
+  // /login straight back to /dashboard.
+  const { teacher, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 

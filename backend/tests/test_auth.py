@@ -48,7 +48,11 @@ def test_refresh_rotation_invalidates_old_token(client, teacher_login):
     s = _login(client, teacher_login)
     r = client.post("/api/auth/refresh", json={"refresh_token": s["refresh"]})
     assert r.status_code == 200
-    new_access = r.json()["access_token"]
+    body = r.json()
+    new_access = body["access_token"]
+    new_refresh = body["refresh_token"]
+    assert new_access and new_refresh
+    assert new_refresh != s["refresh"]
     assert r.headers.get("content-type", "").startswith("application/json")
 
     # Old refresh token must no longer be usable (rotation).
@@ -58,6 +62,34 @@ def test_refresh_rotation_invalidates_old_token(client, teacher_login):
     # New access token works.
     me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_access}"})
     assert me.status_code == 200
+
+
+def test_refresh_chain_works_across_rotations(client, teacher_login):
+    """The rotated refresh token must itself be usable — a teacher whose
+    access token expires repeatedly (15 min TTL) has to survive every
+    rotation, not just the first one."""
+    s = _login(client, teacher_login)
+    refresh = s["refresh"]
+    access = s["access"]
+    for _ in range(3):
+        r = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        old_refresh = refresh
+        access = body["access_token"]
+        refresh = body["refresh_token"]
+        assert refresh and refresh != old_refresh
+        # The replaced token is dead immediately.
+        assert (
+            client.post("/api/auth/refresh", json={"refresh_token": old_refresh}).status_code
+            == 401
+        )
+    # The newest access token authorises normal teacher APIs.
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200
+
+
+def test_refresh_with_unknown_token_rejected(client):
+    assert client.post("/api/auth/refresh", json={"refresh_token": "nope"}).status_code == 401
 
 
 def test_logout_revokes_refresh_token(client, teacher_login):
