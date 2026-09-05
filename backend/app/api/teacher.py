@@ -17,6 +17,7 @@ from ..schemas.attempt import (
     AttemptDetailTeacher,
     AttemptResultItem,
     ExamResultsResponse,
+    OverallRankingResponse,
     RankingResponse,
 )
 from ..schemas.common import Message
@@ -32,6 +33,7 @@ from ..schemas.dashboard import DashboardSummary, ExamRow
 from ..services.attempt_service import AttemptService
 from ..services.exam_service import ExamService, require_owned_exam
 from ..services.question_service import teacher_payload, validate_data
+from ..services.ranking_service import RankingService
 from ..services.student_service import StudentService
 
 router = APIRouter(dependencies=[Depends(get_current_teacher)], tags=["teacher"])
@@ -275,8 +277,12 @@ def attempt_detail(exam_id: str, attempt_id: str, db: Session = Depends(get_db),
 
 @router.get("/exams/{exam_id}/ranking", response_model=RankingResponse)
 def exam_ranking(exam_id: str, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
-    require_owned_exam(db, exam_id, teacher.id)
-    return AttemptService(db).ranking(exam_id, teacher_id=teacher.id)
+    return RankingService(db).exam_ranking(exam_id, teacher_id=teacher.id)
+
+
+@router.get("/rankings", response_model=OverallRankingResponse)
+def overall_ranking(db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
+    return RankingService(db).overall_ranking(teacher.id)
 
 
 # ---------------------------------------------------------------- students

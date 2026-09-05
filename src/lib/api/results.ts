@@ -69,6 +69,7 @@ export interface RankingEntry {
   student_name: string;
   score: number;
   max_score: number;
+  total_marks: number;
   percentage: number;
   time_used_seconds: number;
   attempt_id: string;
@@ -76,10 +77,40 @@ export interface RankingEntry {
 }
 
 export interface RankingResponse {
+  scope: 'exam';
   exam_id: string;
   exam_title: string;
   ranking_enabled: boolean;
+  total_students: number;
+  average_score: number;
+  highest_score: number;
+  lowest_score: number;
+  average_percentage: number;
+  highest_percentage: number;
+  lowest_percentage: number;
   entries: RankingEntry[];
+}
+
+export interface OverallRankingEntry {
+  rank: number;
+  student_name: string;
+  exams_completed: number;
+  average_percentage: number;
+  best_percentage: number;
+}
+
+export interface OverallRankingResponse {
+  scope: 'all';
+  exam_id: null;
+  exam_title: 'All Exams';
+  total_students: number;
+  average_score: number;
+  highest_score: number;
+  lowest_score: number;
+  average_percentage: number;
+  highest_percentage: number;
+  lowest_percentage: number;
+  entries: OverallRankingEntry[];
 }
 
 export const resultsApi = {
@@ -89,4 +120,6 @@ export const resultsApi = {
     request<AttemptDetailResponse>(`/exams/${examId}/results/${attemptId}`),
   teacherRanking: (examId: string) =>
     request<RankingResponse>(`/exams/${examId}/ranking`),
+  teacherOverallRanking: () =>
+    request<OverallRankingResponse>('/rankings'),
 };

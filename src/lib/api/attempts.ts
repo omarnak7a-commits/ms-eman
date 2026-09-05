@@ -95,6 +95,7 @@ export interface SubmittedAttempt {
   unanswered_count: number;
   time_used_seconds: number;
   rank: number | null;
+  ranking_total: number | null;
 }
 
 export interface AttemptStatusData {

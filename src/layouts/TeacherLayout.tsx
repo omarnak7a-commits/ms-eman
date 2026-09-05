@@ -8,6 +8,7 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: '⊞' },
   { to: '/exams', label: 'Exams', icon: '📋' },
   { to: '/students', label: 'Students', icon: '👥' },
+  { to: '/ranking', label: 'Student Ranking', icon: '🏆' },
   { to: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
