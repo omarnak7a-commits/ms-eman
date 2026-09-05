@@ -272,17 +272,29 @@ export function ExamActivePage() {
   }, [id, token, navigate, submitting]);
 
   // Auto-submit ONLY when the server-authoritative deadline actually expires.
-  // Must not run before the attempt has been loaded (no deadline yet) — a
-  // freshly-started active attempt would otherwise be submitted immediately.
+  //
+  // Guarded so it can never fire on the very first frame after an attempt loads.
+  // Hazard being prevented: when resume() resolves it sets `deadline` while
+  // `secondsLeft` is still its stale initial 0, so for one commit isExpired()
+  // reads true and a naive auto-submit effect would submit a just-started,
+  // still-active attempt (score 0). We therefore only ARM auto-submit once the
+  // attempt is loaded AND the timer has confirmed a real, positive remaining
+  // time (deadline in the future). After it is armed it fires only when the
+  // timer truly reaches 0 (server deadline passes).
+  const autoArmed = useRef(false);
   const autoFired = useRef(false);
   useEffect(() => {
-    if (loading || !deadline) return;
+    if (loading || !deadline) return; // attempt not loaded / no real deadline yet
+    if (!isExpired) autoArmed.current = true; // confirmed remaining time > 0
+  }, [loading, deadline, isExpired]);
+  useEffect(() => {
+    if (!autoArmed.current) return;
     if (isExpired && !autoFired.current) {
       autoFired.current = true;
       console.log('[EXAM DEBUG] Timer expired -> submit (timer-expired)');
       doSubmit('timer-expired');
     }
-  }, [isExpired, doSubmit, loading, deadline]);
+  }, [isExpired, doSubmit]);
 
   const handleAnswer = useCallback(async (questionId: string, data: AnswerData) => {
     setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: null } }));

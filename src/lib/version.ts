@@ -5,4 +5,4 @@
  * in any commit that changes runtime behavior, then check it in the browser
  * console / sources.
  */
-export const APP_BUILD = 'exam-flow-fix-2026-09-05a';
+export const APP_BUILD = 'exam-flow-fix-2026-09-05b';
