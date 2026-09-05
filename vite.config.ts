@@ -1,4 +1,4 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, type HtmlTagDescriptor, type Plugin, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
@@ -40,14 +40,7 @@ export default defineConfig(({ mode }) => {
       // In local/dev preview, proxy API requests to the FastAPI backend so the
       // browser talks to a single origin. Point VITE_API_URL at a real deployed
       // backend in production instead.
-      proxy: process.env.VITE_API_URL
-        ? {}
-        : {
-            '/api': {
-              target: process.env.TY_BACKEND_URL || 'http://localhost:8000',
-              changeOrigin: true,
-            },
-          },
+      proxy: apiDevProxy(),
     },
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
@@ -55,6 +48,17 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
+
+/** Dev-only proxy to the local FastAPI backend; undefined in production. */
+function apiDevProxy(): Record<string, string | ProxyOptions> | undefined {
+  if (process.env.VITE_API_URL) return undefined
+  return {
+    '/api': {
+      target: process.env.TY_BACKEND_URL || 'http://localhost:8000',
+      changeOrigin: true,
+    },
+  }
+}
 
 type FigmaSiteConfiguration = {
   title?: string
