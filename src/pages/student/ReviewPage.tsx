@@ -4,6 +4,7 @@ import { attemptsApi, getAttemptToken } from '@/lib/api/attempts';
 import { formatCorrectAnswer, formatStudentAnswer } from '@/lib/formatAnswers';
 import { Logo } from '@/components/Logo';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { QuestionPrompt } from '@/components/QuestionPrompt';
 
 interface ReviewItem {
   question_id: string;
@@ -83,7 +84,14 @@ export function ReviewPage() {
             }`}>
               <div className="flex items-start gap-3 mb-3">
                 <span className="text-xs font-bold text-slate-400 mt-0.5">Q{i + 1}</span>
-                <p className="text-slate-800 font-medium flex-1 text-sm leading-relaxed">{item.text}</p>
+                <div className="flex-1">
+                  <QuestionPrompt
+                    type={item.question_type}
+                    text={item.text}
+                    className="text-slate-800 font-medium text-sm leading-relaxed"
+                    bodyClassName="text-slate-600 text-sm leading-relaxed"
+                  />
+                </div>
                 <span className={`shrink-0 text-xs font-semibold px-2 py-1 rounded-lg ${
                   isCorrect === true ? 'bg-green-100 text-green-700' : isCorrect === false ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
                 }`}>

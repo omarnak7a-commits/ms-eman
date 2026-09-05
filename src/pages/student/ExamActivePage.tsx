@@ -5,6 +5,7 @@ import { useExamTimer } from '@/hooks/useExamTimer';
 import { Logo } from '@/components/Logo';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { QuestionPrompt } from '@/components/QuestionPrompt';
 import type { AnswerData } from '@/types';
 
 interface LiveAnswer {
@@ -342,7 +343,12 @@ export function ExamActivePage() {
               <span className="text-xs text-slate-400 font-medium uppercase tracking-wide">
                 {currentQ.type === 'multiple_choice' ? 'Multiple Choice' : currentQ.type === 'ordering' ? 'Ordering' : 'Correct the Brackets'}
               </span>
-              <p className="text-slate-800 font-semibold mt-1 text-base leading-snug">{currentQ.text}</p>
+              <QuestionPrompt
+                type={currentQ.type}
+                text={currentQ.text}
+                className="text-slate-800 font-semibold mt-1 text-base leading-snug"
+                bodyClassName="text-slate-700 mt-1 text-sm leading-relaxed"
+              />
             </div>
             <div className="shrink-0 ml-3">
               <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-medium">{currentQ.marks} mark{currentQ.marks !== 1 ? 's' : ''}</span>

@@ -6,6 +6,8 @@ import { EmptyState } from '@/components/EmptyState';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { Exam } from '@/types';
+import { copyToClipboard } from '@/lib/clipboard';
+import { examStudentUrl } from '@/lib/examLink';
 
 export function ExamsPage() {
   const navigate = useNavigate();
@@ -14,6 +16,17 @@ export function ExamsPage() {
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ExamApiOut | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyLink = async (exam: Exam) => {
+    const ok = await copyToClipboard(examStudentUrl(exam.slug));
+    if (!ok) {
+      setError('Could not copy the link automatically. Please open the exam and copy the student link manually.');
+      return;
+    }
+    setCopiedId(exam.id);
+    window.setTimeout(() => setCopiedId(cur => (cur === exam.id ? null : cur)), 2000);
+  };
 
   const load = () => {
     setLoading(true);
@@ -103,22 +116,44 @@ export function ExamsPage() {
                   <span>{exam.attempt_count} attempt{exam.attempt_count !== 1 ? 's' : ''}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {exam.status !== 'draft' ? (
-                  <Link to={`/exams/${exam.id}/results`} className="text-xs text-blue-600 font-medium hover:text-blue-700">
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleCopyLink(exam)}
+                  disabled={busy}
+                  className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                  title="Copy student exam link"
+                >
+                  {copiedId === exam.id ? '✓ Copied!' : 'Copy Link'}
+                </button>
+                <Link
+                  to={`/exams/${exam.id}`}
+                  className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50"
+                  title="Edit exam"
+                >
+                  Edit
+                </Link>
+                {exam.status !== 'draft' && (
+                  <Link
+                    to={`/exams/${exam.id}/results`}
+                    className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-blue-600 hover:border-blue-300 hover:bg-blue-50"
+                  >
                     Results
                   </Link>
-                ) : null}
+                )}
                 <button
+                  type="button"
                   onClick={() => handleDuplicate(exam)}
                   disabled={busy}
-                  className="text-xs text-slate-500 hover:text-slate-700"
+                  className="text-xs text-slate-500 hover:text-slate-700 px-1"
+                  title="Duplicate exam"
                 >
-                  Copy
+                  Duplicate
                 </button>
                 <button
+                  type="button"
                   onClick={() => setDeleteTarget(exam)}
-                  className="text-xs text-red-400 hover:text-red-600"
+                  className="text-xs text-red-400 hover:text-red-600 px-1"
                 >
                   Delete
                 </button>

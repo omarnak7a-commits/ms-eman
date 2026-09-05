@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSession } from '@/lib/auth';
 import { dashboardApi } from '@/lib/api/dashboard';
@@ -5,6 +6,9 @@ import { useAsync } from '@/hooks/useAsync';
 import { ExamStatusBadge } from '@/components/StatusBadge';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { EmptyState } from '@/components/EmptyState';
+import { copyToClipboard } from '@/lib/clipboard';
+import { examStudentUrl } from '@/lib/examLink';
+import type { Exam } from '@/types';
 
 function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
@@ -18,6 +22,15 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 export function DashboardPage() {
   const teacher = getSession();
   const { data: stats, loading, error } = useAsync(() => dashboardApi.summary(), []);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyLink = async (exam: Exam) => {
+    const ok = await copyToClipboard(examStudentUrl(exam.slug));
+    if (ok) {
+      setCopiedId(exam.id);
+      window.setTimeout(() => setCopiedId(cur => (cur === exam.id ? null : cur)), 2000);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -59,7 +72,7 @@ export function DashboardPage() {
             ) : (
               <div className="divide-y divide-slate-100">
                 {stats.recent_exams.map(exam => (
-                  <div key={exam.id} className="px-6 py-4 flex items-center gap-4">
+                  <div key={exam.id} className="px-6 py-4 flex items-center gap-4 flex-wrap sm:flex-nowrap">
                     <div className="flex-1 min-w-0">
                       <Link to={`/exams/${exam.id}`} className="font-medium text-slate-800 hover:text-blue-600 truncate block">
                         {exam.title}
@@ -67,6 +80,23 @@ export function DashboardPage() {
                       <div className="text-xs text-slate-500 mt-0.5">
                         {exam.question_count} questions · {exam.duration_minutes} min
                       </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyLink(exam)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50"
+                        title="Copy student exam link"
+                      >
+                        {copiedId === exam.id ? '✓ Copied!' : 'Copy Link'}
+                      </button>
+                      <Link
+                        to={`/exams/${exam.id}`}
+                        className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50"
+                        title="Edit exam"
+                      >
+                        Edit
+                      </Link>
                     </div>
                     <ExamStatusBadge status={exam.status} />
                     <div className="text-right hidden sm:block">

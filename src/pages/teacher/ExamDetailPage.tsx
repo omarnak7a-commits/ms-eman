@@ -7,6 +7,7 @@ import type {
 import { ExamStatusBadge } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { FIXED_QUESTION_HEADERS } from '@/lib/questionPrompt';
 
 const DURATION_PRESETS = [10, 20, 30, 45, 60];
 
@@ -236,6 +237,7 @@ function QuestionCard({
     ordering: 'Ordering',
     correct_brackets: 'Correct Brackets',
   };
+  const fixedHeader = FIXED_QUESTION_HEADERS[question.type];
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -267,14 +269,35 @@ function QuestionCard({
       {expanded && (
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">Question text</label>
-            <textarea
-              value={question.text}
-              onChange={e => onUpdate({ ...question, text: e.target.value })}
-              rows={2}
-              placeholder="Enter question text..."
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-            />
+            {fixedHeader ? (
+              <>
+                <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">Question</p>
+                <p className="text-sm text-slate-800 font-semibold mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
+                  {fixedHeader}
+                </p>
+                <label className="block text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">
+                  Extra instructions (optional)
+                </label>
+                <textarea
+                  value={question.text}
+                  onChange={e => onUpdate({ ...question, text: e.target.value })}
+                  rows={2}
+                  placeholder="Optional extra instructions shown under the fixed header"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+              </>
+            ) : (
+              <>
+                <label className="block text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">Question text</label>
+                <textarea
+                  value={question.text}
+                  onChange={e => onUpdate({ ...question, text: e.target.value })}
+                  rows={2}
+                  placeholder="Enter question text..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+              </>
+            )}
           </div>
           {question.type === 'multiple_choice' && (
             <MCQEditor question={question} onChange={onUpdate} />
@@ -364,7 +387,11 @@ export function ExamDetailPage() {
     for (let n = 0; n < questions.length; n++) {
       const q = questions[n];
       const label = `Question ${n + 1}`;
-      if (!q.text?.trim()) errs.push(`${label}: Question text is required.`);
+      // Ordering/correct-brackets carry a fixed auto header, so a question
+      // text (extra instructions) is optional for them. MCQ still requires it.
+      if (!FIXED_QUESTION_HEADERS[q.type] && !q.text?.trim()) {
+        errs.push(`${label}: Question text is required.`);
+      }
       if (q.marks <= 0) errs.push(`${label}: Marks must be > 0.`);
       if (q.type === 'multiple_choice' && q.data.type === 'multiple_choice') {
         if (!q.data.options.some(o => o.is_correct)) errs.push(`${label}: No correct answer selected.`);
@@ -429,9 +456,15 @@ export function ExamDetailPage() {
     try {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
+        // For ordering/correct-brackets the fixed header is shown automatically,
+        // so if no extra instructions were entered we store the header itself as
+        // the question text (the API requires a non-empty text). Display layers
+        // de-duplicate it, so it is never shown twice.
+        const fixedHeader = FIXED_QUESTION_HEADERS[q.type];
+        const text = q.text?.trim() ? q.text : (fixedHeader ?? q.text);
         createdQs.push(await examsApi.addQuestion(examId, {
           type: q.type,
-          text: q.text,
+          text,
           marks: q.marks,
           order_index: i,
           data: q.data as unknown as Record<string, unknown>,

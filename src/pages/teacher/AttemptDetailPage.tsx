@@ -4,6 +4,7 @@ import { examsApi } from '@/lib/api/exams';
 import { useAsync } from '@/hooks/useAsync';
 import { formatCorrectAnswer, formatStudentAnswer } from '@/lib/formatAnswers';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { QuestionPrompt } from '@/components/QuestionPrompt';
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -79,7 +80,14 @@ export function AttemptDetailPage() {
             }`}>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-bold text-slate-400 mt-1">Q{i + 1}</span>
-                <p className="text-slate-800 font-medium flex-1">{item.text}</p>
+                <div className="flex-1">
+                  <QuestionPrompt
+                    type={item.question_type}
+                    text={item.text}
+                    className="text-slate-800 font-medium"
+                    bodyClassName="text-slate-600 text-sm mt-0.5"
+                  />
+                </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                   isCorrect === true ? 'bg-green-100 text-green-700' :
                   isCorrect === false ? 'bg-red-100 text-red-700' :
