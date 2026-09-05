@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -11,9 +11,11 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Already signed in (e.g. returning to /login): redirect declaratively.
+  // Calling navigate() during render triggers React Router's
+  // "call navigate() in a useEffect" warning and a blank frame.
   if (isAuthenticated) {
-    navigate('/dashboard');
-    return null;
+    return <Navigate to="/dashboard" replace />;
   }
 
   const handleSubmit = async (e: FormEvent) => {
