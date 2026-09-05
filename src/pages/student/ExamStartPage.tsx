@@ -65,8 +65,13 @@ export function ExamStartPage() {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <div className="px-6 pt-6 pb-4 text-center border-b border-slate-100">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium mb-1">Presented by</p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">Ms Eman Zahy</h1>
+        </div>
+
         <div className="bg-blue-600 px-6 py-5 text-white text-center">
-          <h1 className="text-xl font-bold">{info.title}</h1>
+          <h2 className="text-xl font-bold">{info.title}</h2>
           {info.description && <p className="text-blue-100 text-sm mt-1">{info.description}</p>}
         </div>
 

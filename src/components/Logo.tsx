@@ -7,11 +7,15 @@ interface LogoProps {
 
 export function Logo({ size = 'md', className = '' }: LogoProps) {
   const heights: Record<string, string> = { sm: 'h-8', md: 'h-12', lg: 'h-16' };
+  // When the caller supplies its own (possibly responsive) height classes, let
+  // those win instead of the fixed `size` height so we can scale on mobile.
+  const hasHeightOverride = /\bh-[\w.[\]]+/.test(className);
+  const heightCls = hasHeightOverride ? '' : (heights[size] ?? 'h-12');
   return (
     <img
       src={logoImg}
       alt="Test Yourself – Ms Eman Zahy"
-      className={`${heights[size]} w-auto object-contain ${className}`}
+      className={`${heightCls} w-auto object-contain ${className}`}
     />
   );
 }
