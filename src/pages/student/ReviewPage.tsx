@@ -5,6 +5,7 @@ import { formatCorrectAnswer, formatStudentAnswer } from '@/lib/formatAnswers';
 import { Logo } from '@/components/Logo';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { QuestionPrompt } from '@/components/QuestionPrompt';
+import { ExamTeacherName } from '@/components/ExamTeacherName';
 
 interface ReviewItem {
   question_id: string;
@@ -54,7 +55,8 @@ export function ReviewPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
-      <div className="flex justify-center mb-5"><Logo size="sm" /></div>
+      <div className="flex justify-center mb-1"><Logo size="sm" /></div>
+      <ExamTeacherName className="mb-5" />
 
       <div className="flex items-center justify-between mb-5">
         <div>

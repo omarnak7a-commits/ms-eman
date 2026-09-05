@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { QuestionPrompt } from '@/components/QuestionPrompt';
+import { ExamTeacherName } from '@/components/ExamTeacherName';
 import type { AnswerData } from '@/types';
 
 interface LiveAnswer {
@@ -252,14 +253,17 @@ export function ExamActivePage() {
     }
   }, [id, token, navigate, submitting]);
 
-  // Auto-submit when the server deadline is reached.
+  // Auto-submit ONLY when the server-authoritative deadline actually expires.
+  // Must not run before the attempt has been loaded (no deadline yet) — a
+  // freshly-started active attempt would otherwise be submitted immediately.
   const autoFired = useRef(false);
   useEffect(() => {
+    if (loading || !deadline) return;
     if (isExpired && !autoFired.current) {
       autoFired.current = true;
       doSubmit();
     }
-  }, [isExpired, doSubmit]);
+  }, [isExpired, doSubmit, loading, deadline]);
 
   const handleAnswer = useCallback(async (questionId: string, data: AnswerData) => {
     setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: null } }));
@@ -298,6 +302,10 @@ export function ExamActivePage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-4 pb-8">
+      {/* Teacher name stays above the current question and remains visible while
+          navigating between questions. */}
+      <ExamTeacherName className="mb-2" />
+
       <div className="flex items-center justify-between mb-4 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-slate-200 z-10">
         <div className="flex items-center gap-3">
           <Logo size="sm" />

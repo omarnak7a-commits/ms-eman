@@ -58,6 +58,23 @@ export function ExamStartPage() {
     );
   }
 
+  // Guard against empty exams so starting one can never produce a silent 0.
+  if (info.question_count === 0) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-8">
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="bg-blue-600 px-6 py-5 text-white text-center">
+            <h2 className="text-xl font-bold">{info.title}</h2>
+          </div>
+          <div className="px-6 py-12 text-center">
+            <p className="text-lg font-semibold text-slate-800 mb-1">This exam has no questions yet.</p>
+            <p className="text-sm text-slate-500">Please check back later.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-md mx-auto px-4 py-8">
       <div className="flex justify-center mb-6">
