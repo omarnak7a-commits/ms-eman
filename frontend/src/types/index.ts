@@ -102,4 +102,6 @@ export interface Answer {
 export type AnswerData =
   | { type: 'multiple_choice'; selected_option_id: string }
   | { type: 'ordering'; token_ids: string[] }
-  | { type: 'correct_brackets'; answer: string };
+  // Single-bracket questions store one string; multi-bracket questions store
+  // one string per bracket (the shapes the backend validates and grades).
+  | { type: 'correct_brackets'; answer: string | string[] };
