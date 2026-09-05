@@ -2,7 +2,8 @@
 node_modules/
 
 # Build output
-dist/
+# NOTE: `dist/` is intentionally committed because the Vercel Python
+# deployment serves the prebuilt frontend bundle from the repository.
 build/
 coverage/
 
