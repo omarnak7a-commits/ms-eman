@@ -29,6 +29,10 @@ class TokenPair(BaseModel):
 
 class TokenRefreshResponse(BaseModel):
     access_token: str
+    # The backend rotates refresh tokens on every refresh (the presented token
+    # is revoked). The client MUST persist this new token, otherwise it would
+    # keep a revoked one and the next refresh would fail, logging the user out.
+    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
 

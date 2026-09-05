@@ -44,6 +44,43 @@ def test_teacher_exam_route_requires_token(client):
     assert client.get("/api/exams").status_code == 401
 
 
+def test_refresh_returns_rotated_refresh_token(client, teacher_login):
+    """Production regression: rotation must hand the NEW refresh token to the
+    client, otherwise the client keeps a revoked token and the next refresh
+    fails (intermittent 'Authentication required.' on the frontend)."""
+    s = _login(client, teacher_login)
+    r = client.post("/api/auth/refresh", json={"refresh_token": s["refresh"]})
+    assert r.status_code == 200
+    data = r.json()
+    # New access token + a NEW refresh token are both returned.
+    assert data["access_token"]
+    assert data["refresh_token"]
+    assert data["refresh_token"] != s["refresh"]
+
+    # The rotated (new) refresh token works for the NEXT refresh — this is the
+    # exact sequence the frontend now performs across token expiries.
+    r2 = client.post("/api/auth/refresh", json={"refresh_token": data["refresh_token"]})
+    assert r2.status_code == 200
+    assert r2.json()["refresh_token"] != data["refresh_token"]
+
+
+def test_refreshed_access_token_is_usable(client, teacher_login):
+    s = _login(client, teacher_login)
+    r = client.post("/api/auth/refresh", json={"refresh_token": s["refresh"]})
+    assert r.status_code == 200
+    me = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {r.json()['access_token']}"},
+    )
+    assert me.status_code == 200
+
+
+def test_refresh_rejects_garbage_token(client, teacher_login):
+    _login(client, teacher_login)
+    r = client.post("/api/auth/refresh", json={"refresh_token": "not-a-real-token"})
+    assert r.status_code == 401
+
+
 def test_refresh_rotation_invalidates_old_token(client, teacher_login):
     s = _login(client, teacher_login)
     r = client.post("/api/auth/refresh", json={"refresh_token": s["refresh"]})

@@ -18,6 +18,10 @@ export async function login(email: string, password: string): Promise<Teacher> {
   return me.teacher;
 }
 
+export async function me(): Promise<{ teacher: Teacher }> {
+  return request<{ teacher: Teacher }>('/auth/me');
+}
+
 export async function changePassword(
   current_password: string,
   new_password: string,
