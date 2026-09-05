@@ -358,29 +358,44 @@ export function ExamDetailPage() {
     setQuestions(newQs.map((q, i) => ({ ...q, order_index: i })));
   };
 
+  /** Validate every present question against the backend's per-type rules. */
+  const validateQuestions = (): string[] => {
+    const errs: string[] = [];
+    for (let n = 0; n < questions.length; n++) {
+      const q = questions[n];
+      const label = `Question ${n + 1}`;
+      if (!q.text?.trim()) errs.push(`${label}: Question text is required.`);
+      if (q.marks <= 0) errs.push(`${label}: Marks must be > 0.`);
+      if (q.type === 'multiple_choice' && q.data.type === 'multiple_choice') {
+        if (!q.data.options.some(o => o.is_correct)) errs.push(`${label}: No correct answer selected.`);
+        if (q.data.options.some(o => !o.text.trim())) errs.push(`${label}: All options need text.`);
+        if (q.data.options.filter(o => o.is_correct).length !== 1) errs.push(`${label}: Select exactly one correct answer.`);
+      }
+      if (q.type === 'ordering' && q.data.type === 'ordering' && q.data.tokens.length < 2) {
+        errs.push(`${label}: Ordering requires at least 2 tokens.`);
+      }
+      if (q.type === 'correct_brackets' && q.data.type === 'correct_brackets') {
+        if (!q.data.sentence.includes('(')) errs.push(`${label}: Sentence must contain bracketed word, e.g. (go).`);
+        if (q.data.brackets.some(b => b.accepted_answers.length === 0)) errs.push(`${label}: Accepted answers required.`);
+      }
+    }
+    return errs;
+  };
+
   const validateForPublish = (): string[] => {
     const errs: string[] = [];
     if (!exam.title?.trim()) errs.push('Exam title is required.');
     if (!exam.duration_minutes || exam.duration_minutes <= 0) errs.push('Duration must be greater than 0.');
     if (questions.length === 0) errs.push('At least one question is required.');
-    for (const q of questions) {
-      const n = questions.indexOf(q) + 1;
-      if (!q.text?.trim()) errs.push(`Question ${n}: Question text is required.`);
-      if (q.marks <= 0) errs.push(`Question ${n}: Marks must be > 0.`);
-      if (q.type === 'multiple_choice' && q.data.type === 'multiple_choice') {
-        if (!q.data.options.some(o => o.is_correct)) errs.push(`Question ${n}: No correct answer selected.`);
-        if (q.data.options.some(o => !o.text.trim())) errs.push(`Question ${n}: All options need text.`);
-        if (q.data.options.filter(o => o.is_correct).length !== 1) errs.push(`Question ${n}: Select exactly one correct answer.`);
-      }
-      if (q.type === 'ordering' && q.data.type === 'ordering' && q.data.tokens.length < 2) {
-        errs.push(`Question ${n}: Ordering requires at least 2 tokens.`);
-      }
-      if (q.type === 'correct_brackets' && q.data.type === 'correct_brackets') {
-        if (!q.data.sentence.includes('(')) errs.push(`Question ${n}: Sentence must contain bracketed word, e.g. (go).`);
-        if (q.data.brackets.some(b => b.accepted_answers.length === 0)) errs.push(`Question ${n}: Accepted answers required.`);
-      }
-    }
-    return errs;
+    return errs.concat(validateQuestions());
+  };
+
+  /** Validation for Create/Save (a bare titled draft is allowed, but any present question must be valid). */
+  const validateBeforeSave = (): string[] => {
+    const errs: string[] = [];
+    if (!exam.title?.trim()) errs.push('Exam title is required.');
+    if (!exam.duration_minutes || exam.duration_minutes <= 0) errs.push('Duration must be greater than 0.');
+    return errs.concat(validateQuestions());
   };
 
   /** Persist exam details + full question set (draft editing). Returns the saved exam. */
@@ -411,15 +426,25 @@ export function ExamDetailPage() {
     }
 
     const createdQs: Question[] = [];
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      createdQs.push(await examsApi.addQuestion(examId, {
-        type: q.type,
-        text: q.text,
-        marks: q.marks,
-        order_index: i,
-        data: q.data as unknown as Record<string, unknown>,
-      }));
+    try {
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        createdQs.push(await examsApi.addQuestion(examId, {
+          type: q.type,
+          text: q.text,
+          marks: q.marks,
+          order_index: i,
+          data: q.data as unknown as Record<string, unknown>,
+        }));
+      }
+    } catch (err) {
+      // Keep Create atomic at the UI level: if adding questions fails on a
+      // freshly-created exam, remove the partial exam so no orphan draft is
+      // left behind, then surface the real error to the teacher.
+      if (isNew) {
+        try { await examsApi.remove(examId); } catch { /* best-effort cleanup */ }
+      }
+      throw err;
     }
 
     setSlug(savedSlug);
@@ -434,6 +459,10 @@ export function ExamDetailPage() {
 
   const handleSaveExam = async () => {
     if (saving) return;
+    // Validate up-front so invalid input is never POSTed (and never leaves a
+    // half-created exam). Mirrors the backend's per-type question rules.
+    const errs = validateBeforeSave();
+    if (errs.length > 0) { setErrors(errs); return; }
     setSaving(true);
     setErrors([]);
     try {
