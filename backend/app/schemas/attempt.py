@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -87,6 +87,7 @@ class SubmittedAttemptOut(BaseModel):
     unanswered_count: int
     time_used_seconds: int
     rank: int | None
+    ranking_total: int | None = None
 
 
 class ResultResponse(BaseModel):
@@ -121,7 +122,10 @@ class RankingEntry(BaseModel):
     rank: int
     student_name: str
     score: float
+    # Legacy student leaderboard field retained for compatibility.
     max_score: float
+    # Teacher ranking API terminology requested by the product spec.
+    total_marks: float
     percentage: float
     time_used_seconds: int
     attempt_id: str
@@ -129,10 +133,42 @@ class RankingEntry(BaseModel):
 
 
 class RankingResponse(BaseModel):
+    scope: Literal["exam"] = "exam"
     exam_id: str
     exam_title: str
     ranking_enabled: bool
+    total_students: int
+    average_score: float
+    highest_score: float
+    lowest_score: float
+    average_percentage: float
+    highest_percentage: float
+    lowest_percentage: float
     entries: list[RankingEntry]
+
+
+class OverallRankingEntry(BaseModel):
+    rank: int
+    student_name: str
+    exams_completed: int
+    average_percentage: float
+    best_percentage: float
+
+
+class OverallRankingResponse(BaseModel):
+    scope: Literal["all"] = "all"
+    exam_id: None = None
+    exam_title: str = "All Exams"
+    total_students: int
+    # Overall scores are normalized percentages because raw marks from
+    # different exams are not comparable.
+    average_score: float
+    highest_score: float
+    lowest_score: float
+    average_percentage: float
+    highest_percentage: float
+    lowest_percentage: float
+    entries: list[OverallRankingEntry]
 
 
 class AttemptResultItem(BaseModel):

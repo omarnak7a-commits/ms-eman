@@ -13,6 +13,7 @@ import { ExamDetailPage } from '@/pages/teacher/ExamDetailPage';
 import { ExamResultsPage } from '@/pages/teacher/ExamResultsPage';
 import { AttemptDetailPage } from '@/pages/teacher/AttemptDetailPage';
 import { StudentsPage } from '@/pages/teacher/StudentsPage';
+import { StudentRankingPage } from '@/pages/teacher/StudentRankingPage';
 import { SettingsPage } from '@/pages/teacher/SettingsPage';
 import { ExamStartPage } from '@/pages/student/ExamStartPage';
 import { ExamActivePage } from '@/pages/student/ExamActivePage';
@@ -51,6 +52,7 @@ function AppRoutes() {
           <Route path="/exams/:id/results" element={<ExamResultsPage />} />
           <Route path="/exams/:id/results/:attemptId" element={<AttemptDetailPage />} />
           <Route path="/students" element={<StudentsPage />} />
+          <Route path="/ranking" element={<StudentRankingPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

@@ -336,7 +336,7 @@ def test_expired_attempt_autosubmits(client, teacher):
     assert res.json()["attempt"]["status"] == "expired"
 
 
-def test_ranking_tiebreak_faster_wins(client, teacher):
+def test_student_ranking_assigns_unique_positions(client, teacher):
     exam = client.post("/api/exams",
                        json={"title": "Ranking", "duration_minutes": 30, "ranking_enabled": True,
                              "result_visibility": True, "review_visibility": True},

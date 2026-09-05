@@ -23,8 +23,6 @@ from ..models.base import utcnow
 from ..models import Answer, Exam, ExamAttempt, Question
 from ..repositories import attempt_repo, exam_repo, question_repo, student_repo
 from ..schemas.attempt import (
-    RankingEntry,
-    RankingResponse,
     ReviewAnswerItem,
     ReviewResponse,
     StartAttemptResponse,
@@ -32,6 +30,7 @@ from ..schemas.attempt import (
 )
 from ..services.grading_service import grade_question
 from ..services.question_service import student_payload
+from ..services.ranking_service import RankingService
 from ..services.student_service import find_or_create
 
 
@@ -339,17 +338,44 @@ class AttemptService:
         self.db.flush()
 
     def _recompute_ranks(self, exam_id: str) -> None:
-        attempts = [a for a in exam_repo.attempts_for_exam(self.db, exam_id)
-                    if a.status in {"submitted", "expired"}]
-        attempts.sort(
-            key=lambda a: (
-                -a.score,
-                a.time_used_seconds,
-                ensure_utc(a.submitted_at) or ensure_utc(a.created_at),
+        """Keep the legacy stored rank aligned with the dynamic ranking rule."""
+        attempts = [
+            a
+            for a in exam_repo.attempts_for_exam(self.db, exam_id)
+            if a.status in {"submitted", "expired"} and a.submitted_at is not None
+        ]
+        for attempt in attempts:
+            attempt.rank = None
+
+        # The application currently prevents repeat attempts, but imported or
+        # legacy data may contain them. Keep only each student's best score.
+        best_by_student: dict[str, ExamAttempt] = {}
+        for attempt in attempts:
+            submitted = ensure_utc(attempt.submitted_at)
+            key = (-attempt.score, submitted, attempt.id)
+            current = best_by_student.get(attempt.student_id)
+            if current is None:
+                best_by_student[attempt.student_id] = attempt
+                continue
+            current_key = (
+                -current.score,
+                ensure_utc(current.submitted_at),
+                current.id,
             )
+            if key < current_key:
+                best_by_student[attempt.student_id] = attempt
+
+        ranked = sorted(
+            best_by_student.values(),
+            key=lambda attempt: (
+                -attempt.score,
+                ensure_utc(attempt.submitted_at),
+                attempt.student_id,
+                attempt.id,
+            ),
         )
-        for rank, a in enumerate(attempts, start=1):
-            a.rank = rank
+        for rank, attempt in enumerate(ranked, start=1):
+            attempt.rank = rank
         self.db.flush()
 
     # ------------------------------------------------------------ results
@@ -397,7 +423,16 @@ class AttemptService:
         attempt = self.get_owned(attempt_id, student_token)
         if attempt.status == "active":
             raise ConflictError("Submit the attempt before viewing results.")
-        return self.submitted_out(attempt)
+        result = self.submitted_out(attempt)
+        if attempt.exam and attempt.exam.ranking_enabled:
+            rank, total = RankingService(self.db).student_position(
+                attempt.exam_id, attempt.student_id
+            )
+            result["rank"] = rank
+            result["ranking_total"] = total
+        else:
+            result["ranking_total"] = None
+        return result
 
     def get_review(self, attempt_id: str, student_token: str) -> dict:
         attempt = self.get_owned(attempt_id, student_token)
@@ -447,30 +482,7 @@ class AttemptService:
 
     # ------------------------------------------------------------ ranking
     def ranking(self, exam_id: str, teacher_id: str | None = None) -> dict:
-        exam = exam_repo.get_by_id(self.db, exam_id)
-        if not exam:
-            raise NotFoundError("Exam not found.")
-        if teacher_id and exam.created_by != teacher_id:
-            raise AuthorizationError("Not allowed to view this ranking.")
-        attempts = exam_repo.attempts_for_exam(self.db, exam_id)
-        finished = [a for a in attempts if a.status in {"submitted", "expired"}]
-        finished.sort(key=lambda a: (a.rank if a.rank is not None else 10**9))
-        entries = [
-            RankingEntry(
-                rank=a.rank or idx + 1,
-                student_name=a.student.name if a.student else "",
-                score=a.score,
-                max_score=a.max_score,
-                percentage=a.percentage,
-                time_used_seconds=a.time_used_seconds,
-                attempt_id=a.id,
-                submitted_at=a.submitted_at,
-            )
-            for idx, a in enumerate(finished)
-        ]
-        return {
-            "exam_id": exam.id,
-            "exam_title": exam.title,
-            "ranking_enabled": exam.ranking_enabled,
-            "entries": [e.model_dump(mode="json") for e in entries],
-        }
+        """Compatibility facade for the existing student ranking endpoint."""
+        return RankingService(self.db).exam_ranking(
+            exam_id, teacher_id=teacher_id
+        )

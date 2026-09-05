@@ -65,8 +65,10 @@ export function ResultPage() {
             </div>
             {attempt.ranking_enabled && attempt.rank && (
               <div className="bg-blue-50 rounded-xl p-3">
-                <div className="text-base font-bold text-blue-700">#{attempt.rank}</div>
-                <div className="text-xs text-slate-500 mt-0.5">Your rank</div>
+                <div className="text-sm font-bold text-blue-700">Your Rank: #{attempt.rank}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {attempt.rank} out of {attempt.ranking_total ?? attempt.rank} students
+                </div>
               </div>
             )}
             {(!attempt.ranking_enabled || !attempt.rank) && (
