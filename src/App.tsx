@@ -47,7 +47,6 @@ function AppRoutes() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/exams" element={<ExamsPage />} />
-          <Route path="/exams/new" element={<ExamDetailPage />} />
           <Route path="/exams/:id" element={<ExamDetailPage />} />
           <Route path="/exams/:id/results" element={<ExamResultsPage />} />
           <Route path="/exams/:id/results/:attemptId" element={<AttemptDetailPage />} />
