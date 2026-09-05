@@ -26,8 +26,14 @@ export function TeacherLayout() {
     <div className="min-h-screen flex bg-slate-50">
       {/* Sidebar – desktop */}
       <aside className="hidden md:flex flex-col w-60 bg-white border-r border-slate-200 shrink-0">
-        <div className="p-4 border-b border-slate-100">
-          <Logo size="sm" />
+        <div className="px-5 py-6 border-b border-slate-100 flex flex-col items-center text-center">
+          <Logo size="lg" className="h-20 w-auto object-contain mx-auto" />
+          <div className="text-sm font-bold text-slate-800 mt-3.5 tracking-tight truncate max-w-full">
+            {teacher?.name || 'Ms Eman Zahy'}
+          </div>
+          <div className="text-xs text-slate-500 font-medium mt-0.5 tracking-wide">
+            Teacher Dashboard
+          </div>
         </div>
         <nav className="flex-1 py-4 px-3 space-y-1">
           {navItems.map(item => (
@@ -78,8 +84,14 @@ export function TeacherLayout() {
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/30" onClick={() => setMobileOpen(false)} />
           <aside className="relative w-64 bg-white flex flex-col h-full">
-            <div className="p-4 border-b border-slate-100">
-              <Logo size="sm" />
+            <div className="px-5 py-6 border-b border-slate-100 flex flex-col items-center text-center">
+              <Logo size="lg" className="h-20 w-auto object-contain mx-auto" />
+              <div className="text-sm font-bold text-slate-800 mt-3.5 tracking-tight truncate max-w-full">
+                {teacher?.name || 'Ms Eman Zahy'}
+              </div>
+              <div className="text-xs text-slate-500 font-medium mt-0.5 tracking-wide">
+                Teacher Dashboard
+              </div>
             </div>
             <nav className="flex-1 py-4 px-3 space-y-1">
               {navItems.map(item => (
