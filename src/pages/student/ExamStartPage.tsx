@@ -30,8 +30,16 @@ export function ExamStartPage() {
     if (!trimmed || trimmed.length < 2) { setError('Please enter your full name (at least 2 characters).'); return; }
     setError('');
     setStarting(true);
+    console.log('[EXAM DEBUG] Start Exam clicked', { slug, name: trimmed });
     try {
       const attempt = await attemptsApi.start(slug!, trimmed);
+      console.log('[EXAM DEBUG] Attempt created', {
+        attemptId: attempt.attempt_id,
+        status: attempt.status,
+        deadline: attempt.deadline_at,
+        durationSeconds: attempt.duration_seconds,
+        questionsCount: (attempt.questions || []).length,
+      });
       setAttemptToken(attempt.attempt_id, attempt.student_token);
       navigate(`/attempt/${attempt.attempt_id}`, { replace: true });
     } catch (err) {

@@ -197,6 +197,8 @@ export function ExamActivePage() {
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  console.log('[EXAM DEBUG] ExamActivePage mounted', { attemptId: id, hasToken: !!token });
+
   // Resume the attempt on load.
   useEffect(() => {
     let on = true;
@@ -210,6 +212,14 @@ export function ExamActivePage() {
       .then(r => {
         if (!on) return;
         const status = r.status;
+        console.log('[EXAM DEBUG] Resume result', {
+          status: status.status,
+          canResume: r.can_resume,
+          deadline: status.deadline_at,
+          questionsCount: (r.questions || []).length,
+          answersCount: (r.answers || []).length,
+          willNavigateToResult: status.status !== 'active' || !r.can_resume,
+        });
         if (status.status !== 'active' || !r.can_resume) {
           navigate(`/attempt/${id}/result`, { replace: true });
           return;
@@ -234,15 +244,23 @@ export function ExamActivePage() {
 
   const { secondsLeft, isExpired, formatted } = useExamTimer(deadline);
 
-  const doSubmit = useCallback(async () => {
+  // Log every timer-state transition (runs when any of these change).
+  useEffect(() => {
+    console.log('[EXAM DEBUG] Timer state', { deadline, secondsLeft, isExpired, loading });
+  }, [deadline, secondsLeft, isExpired, loading]);
+
+  const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;
+    console.log('[EXAM DEBUG] SUBMIT CALLED', { source, attemptId: id });
     setSubmitting(true);
     setSaveError('');
     try {
       await attemptsApi.submit(id!, token);
+      console.log('[EXAM DEBUG] SUBMIT OK', { source, attemptId: id });
       navigate(`/attempt/${id}/result`, { replace: true });
     } catch (e) {
       const msg = (e as { message?: string })?.message || '';
+      console.log('[EXAM DEBUG] SUBMIT ERR', { source, attemptId: id, msg });
       // Already finalised (submitted/expired server-side) → show result.
       if (/submit|expired|active/i.test(msg)) {
         navigate(`/attempt/${id}/result`, { replace: true });
@@ -261,7 +279,8 @@ export function ExamActivePage() {
     if (loading || !deadline) return;
     if (isExpired && !autoFired.current) {
       autoFired.current = true;
-      doSubmit();
+      console.log('[EXAM DEBUG] Timer expired -> submit (timer-expired)');
+      doSubmit('timer-expired');
     }
   }, [isExpired, doSubmit, loading, deadline]);
 
@@ -412,7 +431,7 @@ export function ExamActivePage() {
         message={`You have answered ${answeredIds.size} of ${questions.length} questions. Are you sure you want to submit? You cannot change your answers after submission.`}
         confirmLabel="Submit Exam"
         cancelLabel="Continue"
-        onConfirm={() => { setSubmitConfirm(false); doSubmit(); }}
+        onConfirm={() => { setSubmitConfirm(false); doSubmit('manual-submit'); }}
         onCancel={() => setSubmitConfirm(false)}
       />
     </div>
