@@ -63,7 +63,14 @@ def resume_attempt(attempt_id: str, db: Session = Depends(get_db), token: str = 
         "status": status,
         "can_resume": True,
         "questions": questions,
-        "answers": [{"question_id": a.question_id, "answer_data": a.answer_data} for a in answers],
+        "answers": [
+            {
+                "question_id": a.question_id,
+                "answer_data": a.answer_data,
+                "is_correct": a.is_correct,
+            }
+            for a in answers
+        ],
     }
 
 

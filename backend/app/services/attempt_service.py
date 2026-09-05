@@ -217,6 +217,15 @@ class AttemptService:
         if not question or question.exam_id != attempt.exam_id:
             raise NotFoundError("Question does not belong to this exam.")
 
+        # Strict one-shot lock: an answer is graded and stored the first time it
+        # is submitted (is_correct becomes non-null). Any further submission for
+        # the same question is rejected so a graded answer can never be changed.
+        existing = attempt_repo.get_answer(self.db, attempt.id, question_id)
+        if existing is not None and existing.is_correct is not None:
+            raise ConflictError(
+                "This answer has already been submitted and is locked."
+            )
+
         validated = self._validate_answer_data(question, answer_data)
         answer = attempt_repo.save_answer(
             self.db,

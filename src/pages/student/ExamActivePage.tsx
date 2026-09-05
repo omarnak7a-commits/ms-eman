@@ -9,9 +9,27 @@ import { QuestionPrompt } from '@/components/QuestionPrompt';
 import { ExamTeacherName } from '@/components/ExamTeacherName';
 import type { AnswerData } from '@/types';
 
-interface LiveAnswer {
+// State for a question's answer. An answer only ever reaches the server when
+// the student presses "Submit Answer"; after that it is locked and graded.
+interface AnswerEntry {
   data: AnswerData;
+  submitted: boolean;
   is_correct: boolean | null;
+}
+
+function isAnswerEmpty(data?: AnswerData | null): boolean {
+  if (!data) return true;
+  if (data.type === 'multiple_choice') return !data.selected_option_id;
+  if (data.type === 'ordering') return !data.token_ids || data.token_ids.length === 0;
+  if (data.type === 'correct_brackets') {
+    if (Array.isArray(data.answer)) return data.answer.every(a => !a || !String(a).trim());
+    return !String(data.answer ?? '').trim();
+  }
+  return true;
+}
+
+function errMsg(e: unknown): string {
+  return (e as { message?: string })?.message || 'Something went wrong.';
 }
 
 // ─── MCQ answer ───────────────────────────────────────────────────────────────
@@ -89,11 +107,12 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
               <button
                 key={slotIdx}
                 onClick={() => tokenId && removeFromSlot(slotIdx)}
+                disabled={disabled}
                 className={`px-3 py-2 rounded-xl border-2 text-sm font-medium min-w-12 transition-all ${
                   token
                     ? 'border-blue-400 bg-blue-50 text-blue-800 hover:border-red-400 hover:bg-red-50 hover:text-red-700'
                     : 'border-dashed border-slate-300 text-slate-300'
-                }`}
+                } disabled:cursor-default`}
               >
                 {token ? token.text : <span className="text-xs">{slotIdx + 1}</span>}
               </button>
@@ -121,7 +140,7 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
         </div>
       </div>
 
-      {!disabled && (
+      {!disabled && arranged.length > 0 && (
         <div className="flex gap-2">
           <button onClick={handleUndo} disabled={arranged.length === 0}
             className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">Undo</button>
@@ -141,12 +160,12 @@ function BracketsAnswer({ question, value, onAnswer, disabled }: {
   onAnswer: (data: AnswerData) => void;
   disabled: boolean;
 }) {
-  const parts = (question.data.sentence || '').split(/(\([^)]+\))/g);
+  const parts = (question.data.sentence || '').split(/(\\([^)]+\\))/g);
   return (
     <div>
       <div className="mb-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-800 leading-relaxed">
         {parts.map((part, i) => {
-          if (/^\([^)]+\)$/.test(part)) {
+          if (/^\\([^)]+\\)$/.test(part)) {
             return <span key={i} className="font-semibold text-blue-700 bg-blue-100 px-1 rounded">{part}</span>;
           }
           return <span key={i}>{part}</span>;
@@ -173,7 +192,7 @@ function FeedbackBadge({ isCorrect }: { isCorrect: boolean | null }) {
     <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold ${
       isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
     }`}>
-      <span>{isCorrect ? '✓' : '✗'}</span>
+      <span className="text-lg leading-none">{isCorrect ? '✓' : '✗'}</span>
       <span>{isCorrect ? 'Correct' : 'Incorrect'}</span>
     </div>
   );
@@ -190,14 +209,13 @@ export function ExamActivePage() {
   const [fatal, setFatal] = useState('');
   const [title, setTitle] = useState('');
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, LiveAnswer>>({});
+  const [answers, setAnswers] = useState<Record<string, AnswerEntry>>({});
   const [deadline, setDeadline] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [submitConfirm, setSubmitConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [saveError, setSaveError] = useState('');
-
-  console.log('[EXAM DEBUG] ExamActivePage mounted', { attemptId: id, hasToken: !!token });
 
   // Resume the attempt on load.
   useEffect(() => {
@@ -212,14 +230,6 @@ export function ExamActivePage() {
       .then(r => {
         if (!on) return;
         const status = r.status;
-        console.log('[EXAM DEBUG] Resume result', {
-          status: status.status,
-          canResume: r.can_resume,
-          deadline: status.deadline_at,
-          questionsCount: (r.questions || []).length,
-          answersCount: (r.answers || []).length,
-          willNavigateToResult: status.status !== 'active' || !r.can_resume,
-        });
         if (status.status !== 'active' || !r.can_resume) {
           navigate(`/attempt/${id}/result`, { replace: true });
           return;
@@ -227,9 +237,11 @@ export function ExamActivePage() {
         setTitle(status.exam_title || '');
         setDeadline(status.deadline_at);
         setQuestions(r.questions || []);
-        const map: Record<string, LiveAnswer> = {};
+        // Answers already stored on the server were submitted before a refresh,
+        // so restore them as locked with their grading feedback.
+        const map: Record<string, AnswerEntry> = {};
         (r.answers || []).forEach(a => {
-          if (a.answer_data) map[a.question_id] = { data: a.answer_data, is_correct: null };
+          map[a.question_id] = { data: a.answer_data, submitted: true, is_correct: a.is_correct ?? null };
         });
         setAnswers(map);
         setCurrentIdx(0);
@@ -244,11 +256,6 @@ export function ExamActivePage() {
 
   const { secondsLeft, isExpired, formatted } = useExamTimer(deadline);
 
-  // Log every timer-state transition (runs when any of these change).
-  useEffect(() => {
-    console.log('[EXAM DEBUG] Timer state', { deadline, secondsLeft, isExpired, loading });
-  }, [deadline, secondsLeft, isExpired, loading]);
-
   const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;
     console.log('[EXAM DEBUG] SUBMIT CALLED', { source, attemptId: id });
@@ -256,11 +263,9 @@ export function ExamActivePage() {
     setSaveError('');
     try {
       await attemptsApi.submit(id!, token);
-      console.log('[EXAM DEBUG] SUBMIT OK', { source, attemptId: id });
       navigate(`/attempt/${id}/result`, { replace: true });
     } catch (e) {
-      const msg = (e as { message?: string })?.message || '';
-      console.log('[EXAM DEBUG] SUBMIT ERR', { source, attemptId: id, msg });
+      const msg = errMsg(e);
       // Already finalised (submitted/expired server-side) → show result.
       if (/submit|expired|active/i.test(msg)) {
         navigate(`/attempt/${id}/result`, { replace: true });
@@ -271,40 +276,83 @@ export function ExamActivePage() {
     }
   }, [id, token, navigate, submitting]);
 
-  // Auto-submit ONLY when the server-authoritative deadline actually expires.
-  //
-  // Guarded so it can never fire on the very first frame after an attempt loads.
-  // Hazard being prevented: when resume() resolves it sets `deadline` while
-  // `secondsLeft` is still its stale initial 0, so for one commit isExpired()
-  // reads true and a naive auto-submit effect would submit a just-started,
-  // still-active attempt (score 0). We therefore only ARM auto-submit once the
-  // attempt is loaded AND the timer has confirmed a real, positive remaining
-  // time (deadline in the future). After it is armed it fires only when the
-  // timer truly reaches 0 (server deadline passes).
+  // Auto-submit the whole exam only when the server-authoritative deadline
+  // actually expires. Armed only once a real, positive remaining time is seen
+  // (so a fresh active attempt is never submitted on load).
   const autoArmed = useRef(false);
   const autoFired = useRef(false);
   useEffect(() => {
-    if (loading || !deadline) return; // attempt not loaded / no real deadline yet
-    if (!isExpired) autoArmed.current = true; // confirmed remaining time > 0
+    if (loading || !deadline) return;
+    if (!isExpired) autoArmed.current = true;
   }, [loading, deadline, isExpired]);
   useEffect(() => {
     if (!autoArmed.current) return;
     if (isExpired && !autoFired.current) {
       autoFired.current = true;
-      console.log('[EXAM DEBUG] Timer expired -> submit (timer-expired)');
       doSubmit('timer-expired');
     }
   }, [isExpired, doSubmit]);
 
-  const handleAnswer = useCallback(async (questionId: string, data: AnswerData) => {
-    setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: null } }));
-    try {
-      const saved = await attemptsApi.saveAnswer(id!, questionId, token, data);
-      setAnswers(prev => ({ ...prev, [questionId]: { data, is_correct: saved.is_correct } }));
-    } catch (e) {
-      setSaveError((e as { message?: string })?.message || 'Failed to save your answer.');
+  const currentQ = questions[currentIdx];
+  const currentEntry = currentQ ? answers[currentQ.id] : undefined;
+  const currentData = currentEntry?.data;
+  const currentLocked = !!currentEntry?.submitted || isExpired;
+  const currentDraft = !!currentEntry && !currentEntry.submitted && !isAnswerEmpty(currentEntry.data);
+
+  const selectedOption = currentData?.type === 'multiple_choice' ? currentData.selected_option_id : null;
+  const ordered = currentData?.type === 'ordering' ? currentData.token_ids : [];
+  const bracketValue = currentData?.type === 'correct_brackets'
+    ? (Array.isArray(currentData.answer) ? currentData.answer.join(', ') : currentData.answer)
+    : '';
+
+  const submittedCount = Object.values(answers).filter(a => a.submitted).length;
+  const submittedIds = new Set(Object.entries(answers).filter(([, v]) => v.submitted).map(([qid]) => qid));
+  const draftIds = new Set(Object.entries(answers).filter(([, v]) => !v.submitted && !isAnswerEmpty(v.data)).map(([qid]) => qid));
+
+  // ── Local editing (never sent until "Submit Answer") ──────────────────────
+  const editAnswer = useCallback((questionId: string, data: AnswerData) => {
+    setAnswers(prev => {
+      const existing = prev[questionId];
+      if (existing?.submitted) return prev; // locked on the server; cannot change
+      return { ...prev, [questionId]: { data, submitted: false, is_correct: null } };
+    });
+  }, []);
+
+  const canSubmitCurrent = !!currentQ && !!currentEntry && !currentEntry.submitted
+    && !isAnswerEmpty(currentEntry.data) && !isExpired && !submittingAnswer;
+
+  const submitCurrentAnswer = useCallback(async () => {
+    if (!currentQ || !currentEntry || currentEntry.submitted) return;
+    if (isAnswerEmpty(currentEntry.data)) return;
+    if (isExpired) {
+      setSaveError('Time is up — no more answers can be submitted.');
+      return;
     }
-  }, [id, token]);
+    setSubmittingAnswer(true);
+    setSaveError('');
+    try {
+      const saved = await attemptsApi.saveAnswer(id!, currentQ.id, token, currentEntry.data);
+      setAnswers(prev => ({
+        ...prev,
+        [currentQ.id]: { data: currentEntry.data, submitted: true, is_correct: saved.is_correct },
+      }));
+    } catch (e) {
+      setSaveError(errMsg(e) || 'Failed to submit your answer. Please try again.');
+    } finally {
+      setSubmittingAnswer(false);
+    }
+  }, [currentQ, currentEntry, id, token, isExpired]);
+
+  // ── Navigation: cannot leave while the current question has an unsubmitted answer ──
+  const tryNavigate = useCallback((idx: number) => {
+    if (currentQ && currentDraft) {
+      setSaveError('Submit your answer before moving on.');
+      return;
+    }
+    setSaveError('');
+    const max = questions.length - 1;
+    setCurrentIdx(Math.max(0, Math.min(idx, max)));
+  }, [currentQ, currentDraft, questions.length]);
 
   if (loading) return <LoadingSpinner className="min-h-[60vh]" />;
 
@@ -323,18 +371,8 @@ export function ExamActivePage() {
     );
   }
 
-  const currentQ = questions[currentIdx];
-  const answeredIds = new Set(Object.keys(answers));
-  const currentData = currentQ ? answers[currentQ.id]?.data : undefined;
-  const selectedOption =
-    currentData?.type === 'multiple_choice' ? currentData.selected_option_id : null;
-  const ordered = currentData?.type === 'ordering' ? currentData.token_ids : [];
-  const bracketValue = currentData?.type === 'correct_brackets' ? currentData.answer : '';
-
   return (
     <div className="max-w-2xl mx-auto px-4 py-4 pb-8">
-      {/* Teacher name stays above the current question and remains visible while
-          navigating between questions. */}
       <ExamTeacherName className="mb-2" />
 
       <div className="flex items-center justify-between mb-4 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-slate-200 z-10">
@@ -357,22 +395,29 @@ export function ExamActivePage() {
       )}
 
       <div className="flex flex-wrap gap-1.5 mb-5">
-        {questions.map((q, i) => (
-          <button
-            key={q.id}
-            onClick={() => setCurrentIdx(i)}
-            className={`w-9 h-9 rounded-xl text-sm font-semibold transition-all ${
-              i === currentIdx
-                ? 'bg-blue-600 text-white shadow-sm scale-110'
-                : answeredIds.has(q.id)
-                ? 'bg-green-100 text-green-700 border border-green-200'
-                : 'bg-white text-slate-500 border border-slate-200 hover:border-blue-300'
-            }`}
-            aria-label={`Question ${i + 1}${answeredIds.has(q.id) ? ' (answered)' : ' (unanswered)'}`}
-          >
-            {i + 1}
-          </button>
-        ))}
+        {questions.map((q, i) => {
+          const isCurrent = i === currentIdx;
+          const isSubmitted = submittedIds.has(q.id);
+          const isDraft = draftIds.has(q.id);
+          return (
+            <button
+              key={q.id}
+              onClick={() => tryNavigate(i)}
+              className={`w-9 h-9 rounded-xl text-sm font-semibold transition-all ${
+                isCurrent
+                  ? 'bg-blue-600 text-white shadow-sm scale-110'
+                  : isSubmitted
+                  ? 'bg-green-100 text-green-700 border border-green-200'
+                  : isDraft
+                  ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                  : 'bg-white text-slate-500 border border-slate-200 hover:border-blue-300'
+              }`}
+              aria-label={`Question ${i + 1}${isSubmitted ? ' (submitted)' : isDraft ? ' (answer not submitted)' : ' (unanswered)'}`}
+            >
+              {i + 1}
+            </button>
+          );
+        })}
       </div>
 
       {currentQ && (
@@ -395,28 +440,42 @@ export function ExamActivePage() {
           </div>
 
           {currentQ.type === 'multiple_choice' && (
-            <MCQAnswer question={currentQ} selected={selectedOption} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
+            <MCQAnswer question={currentQ} selected={selectedOption} onAnswer={d => editAnswer(currentQ.id, d)} disabled={currentLocked} />
           )}
           {currentQ.type === 'ordering' && (
-            <OrderingAnswer question={currentQ} arranged={ordered} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
+            <OrderingAnswer question={currentQ} arranged={ordered} onAnswer={d => editAnswer(currentQ.id, d)} disabled={currentLocked} />
           )}
           {currentQ.type === 'correct_brackets' && (
-            <BracketsAnswer question={currentQ} value={bracketValue} onAnswer={d => handleAnswer(currentQ.id, d)} disabled={isExpired} />
+            <BracketsAnswer question={currentQ} value={bracketValue} onAnswer={d => editAnswer(currentQ.id, d)} disabled={currentLocked} />
           )}
 
-          {answers[currentQ.id]?.is_correct !== undefined && (
-            <div className="mt-4"><FeedbackBadge isCorrect={answers[currentQ.id]?.is_correct ?? null} /></div>
-          )}
+          <div className="mt-5 flex flex-col items-stretch sm:items-end gap-3">
+            {currentEntry?.submitted ? (
+              <div className="w-full sm:w-auto flex flex-col gap-2 items-stretch sm:items-end">
+                <div className="w-full sm:w-56"><FeedbackBadge isCorrect={currentEntry.is_correct} /></div>
+                <span className="text-xs text-slate-400 inline-flex items-center gap-1 justify-end">🔒 Answer locked</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={submitCurrentAnswer}
+                disabled={!canSubmitCurrent}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {submittingAnswer ? 'Submitting…' : 'Submit Answer'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <button onClick={() => setCurrentIdx(i => Math.max(0, i - 1))} disabled={currentIdx === 0}
+        <button onClick={() => tryNavigate(currentIdx - 1)} disabled={currentIdx === 0}
           className="px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors">
           ← Previous
         </button>
         {currentIdx < questions.length - 1 ? (
-          <button onClick={() => setCurrentIdx(i => i + 1)}
+          <button onClick={() => tryNavigate(currentIdx + 1)}
             className="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors">
             Next →
           </button>
@@ -440,7 +499,7 @@ export function ExamActivePage() {
       <ConfirmDialog
         open={submitConfirm}
         title="Submit Exam"
-        message={`You have answered ${answeredIds.size} of ${questions.length} questions. Are you sure you want to submit? You cannot change your answers after submission.`}
+        message={`You have submitted ${submittedCount} of ${questions.length} questions. Unsubmitted questions will be marked unanswered. Are you sure you want to submit the whole exam?`}
         confirmLabel="Submit Exam"
         cancelLabel="Continue"
         onConfirm={() => { setSubmitConfirm(false); doSubmit('manual-submit'); }}

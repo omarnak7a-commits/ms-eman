@@ -128,7 +128,11 @@ export const attemptsApi = {
       status: AttemptStatusData;
       can_resume: boolean;
       questions?: StudentQuestion[];
-      answers?: Array<{ question_id: string; answer_data: AnswerData }>;
+      answers?: Array<{
+        question_id: string;
+        answer_data: AnswerData;
+        is_correct: boolean | null;
+      }>;
     }>(`/attempts/${attemptId}/resume`, { auth: 'student', token }),
   saveAnswer: (attemptId: string, questionId: string, token: string, answer_data: AnswerData) =>
     request<SavedAnswer>(`/attempts/${attemptId}/answers/${questionId}`, {

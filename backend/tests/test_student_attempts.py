@@ -109,10 +109,16 @@ def test_autosave_returns_immediate_correctness(client, teacher):
                    json={"answer_data": correct_answers()["multiple_choice"]}, headers=h)
     assert r.status_code == 200
     assert r.json()["is_correct"] is True
+    # Strict one-shot lock: a second submission for the same question is rejected.
     r2 = client.put(f"/api/attempts/{aid}/answers/{qmap['multiple_choice']}",
                     json={"answer_data": {"type": "multiple_choice", "selected_option_id": "o2"}}, headers=h)
-    assert r2.status_code == 200
-    assert r2.json()["is_correct"] is False
+    assert r2.status_code == 409
+    # The original graded answer is preserved after the rejected resubmit.
+    resume = client.get(f"/api/attempts/{aid}/resume", headers=h).json()
+    assert resume["can_resume"] is True
+    ans = {a["question_id"]: a for a in resume["answers"]}
+    assert ans[qmap["multiple_choice"]]["answer_data"]["selected_option_id"] == "o1"
+    assert ans[qmap["multiple_choice"]]["is_correct"] is True
 
 
 def test_full_correct_submission(client, teacher):
@@ -166,6 +172,60 @@ def test_duplicate_submission_prevented(client, teacher):
     h = attempt_headers(data)
     assert client.post(f"/api/attempts/{data['attempt_id']}/submit", headers=h).status_code == 200
     assert client.post(f"/api/attempts/{data['attempt_id']}/submit", headers=h).status_code == 409
+
+
+def test_resume_returns_locked_graded_answers(client, teacher):
+    exam = make_published_exam(client, teacher)
+    data = start(client, exam["slug"], "Sara")
+    aid = data["attempt_id"]
+    h = attempt_headers(data)
+    qmap = {q["type"]: q["id"] for q in data["questions"]}
+    ca = correct_answers()
+    # Submit one correct and one incorrect answer, leave one unanswered.
+    client.put(f"/api/attempts/{aid}/answers/{qmap['multiple_choice']}",
+               json={"answer_data": ca["multiple_choice"]}, headers=h)
+    wrong_order = {"type": "ordering", "token_ids": ["t4", "t3", "t2", "t1"]}
+    client.put(f"/api/attempts/{aid}/answers/{qmap['ordering']}",
+               json={"answer_data": wrong_order}, headers=h)
+    resume = client.get(f"/api/attempts/{aid}/resume", headers=h).json()
+    assert resume["can_resume"] is True
+    ans = {a["question_id"]: a for a in resume["answers"]}
+    assert ans[qmap["multiple_choice"]]["is_correct"] is True
+    assert ans[qmap["ordering"]]["is_correct"] is False
+    # Only submitted questions appear; the brackets question is still unanswered.
+    assert qmap["correct_brackets"] not in ans
+    # Locked questions cannot be changed after a resume/reload.
+    r = client.put(f"/api/attempts/{aid}/answers/{qmap['multiple_choice']}",
+                   json={"answer_data": {"type": "multiple_choice", "selected_option_id": "o2"}}, headers=h)
+    assert r.status_code == 409
+
+
+def test_each_question_type_locks_after_submit(client, teacher):
+    exam = make_published_exam(client, teacher)
+    data = start(client, exam["slug"], "Sara")
+    aid = data["attempt_id"]
+    h = attempt_headers(data)
+    qmap = {q["type"]: q["id"] for q in data["questions"]}
+    ca = correct_answers()
+    wrong = {
+        "multiple_choice": {"type": "multiple_choice", "selected_option_id": "o2"},
+        "ordering": {"type": "ordering", "token_ids": ["t4", "t3", "t2", "t1"]},
+        "correct_brackets": {"type": "correct_brackets", "answer": "go"},
+    }
+    # Double-click guard: submitting the same question again immediately is 409.
+    for qtype, qid in qmap.items():
+        r1 = client.put(f"/api/attempts/{aid}/answers/{qid}",
+                        json={"answer_data": wrong[qtype]}, headers=h)
+        assert r1.status_code == 200
+        assert r1.json()["is_correct"] is False
+        r2 = client.put(f"/api/attempts/{aid}/answers/{qid}",
+                        json={"answer_data": ca[qtype]}, headers=h)
+        assert r2.status_code == 409
+    # Even re-sending an identical submitted answer is rejected (server is source of truth).
+    for qtype, qid in qmap.items():
+        r3 = client.put(f"/api/attempts/{aid}/answers/{qid}",
+                        json={"answer_data": wrong[qtype]}, headers=h)
+        assert r3.status_code == 409
 
 
 def test_cannot_answer_after_submit(client, teacher):
