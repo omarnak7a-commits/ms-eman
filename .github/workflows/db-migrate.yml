@@ -8,7 +8,13 @@
 # dropped or deleted: pre/post checks compare row counts and verify the
 # snapshot backfill covers every attempt.
 #
-# Usage: Actions tab -> "DB migrate (Neon)" -> Run workflow -> select branch.
+# Triggers:
+#   - workflow_dispatch (manual, via Actions tab or `gh workflow run`)
+#   - push of THIS file on the arena branch (a workflow_dispatch-only file is
+#     only registered by GitHub from the default branch, so the push trigger
+#     is what actually makes it runnable from a feature branch). Committing
+#     any change to this file fires it; once migrated it is an idempotent
+#     no-op.
 # Requires repo secret DATABASE_URL = postgresql+psycopg2://...neon...?sslmode=require
 
 name: DB migrate (Neon)
@@ -20,6 +26,9 @@ on:
         description: "Alembic revision target"
         required: true
         default: "head"
+  push:
+    branches: [arena/01a073ce-ms-eman]
+    paths: [".github/workflows/db-migrate.yml"]
 
 concurrency:
   group: db-migrate
@@ -85,9 +94,9 @@ jobs:
           alembic heads
           alembic history
 
-      - name: Apply migration - alembic upgrade ${{ inputs.target }}
+      - name: Apply migration - alembic upgrade ${{ inputs.target || 'head' }}
         working-directory: backend
-        run: alembic upgrade ${{ inputs.target }}
+        run: alembic upgrade ${{ inputs.target || 'head' }}
 
       - name: Post-check (READ-ONLY) - revision, columns, counts, backfill
         working-directory: backend
