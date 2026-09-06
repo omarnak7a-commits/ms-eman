@@ -16,6 +16,9 @@
 #     any change to this file fires it; once migrated it is an idempotent
 #     no-op.
 # Requires repo secret DATABASE_URL = postgresql+psycopg2://...neon...?sslmode=require
+#
+# Key results are emitted as ::notice:: annotations so they are readable via
+# the check-runs API even when raw log download is unavailable.
 
 name: DB migrate (Neon)
 
@@ -39,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      # The Neon connection string, injected as a GitHub Actions secret.
+      # The value itself is never printed anywhere in this workflow.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Checkout
@@ -52,13 +57,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Guard - DATABASE_URL secret present (value never printed)
+      - name: Guard - DATABASE_URL present (value never printed)
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::Repository secret DATABASE_URL is not set. Add it in Settings -> Secrets and variables -> Actions (Neon connection string with the postgresql+psycopg2:// scheme)."
+            echo "::error::Repository secret DATABASE_URL is not set. Add it in Settings -> Secrets and variables -> Actions with the Neon connection string in postgresql+psycopg2://...?sslmode=require form."
             exit 1
           fi
-          echo "DATABASE_URL is set (length only): ${#DATABASE_URL}"
+          echo "::notice::GUARD OK - DATABASE_URL is set (length ${#DATABASE_URL}, value never printed)"
 
       - name: Pre-check (READ-ONLY) - current revision, schema, row counts
         working-directory: backend
@@ -82,10 +87,14 @@ jobs:
                   t: sorted(col["name"] for col in insp.get_columns(t))
                   for t in ("exam_attempts", "questions") if insp.has_table(t)
               }
-          print("CURRENT alembic_version:", ver[0] if ver else None)
+          ver_s = ver[0] if ver else None
+          print("CURRENT alembic_version:", ver_s)
           print("ROW COUNTS:", json.dumps(counts))
           print("exam_attempts columns:", cols.get("exam_attempts"))
           print("questions columns:", cols.get("questions"))
+          print(f"::notice::PRE alembic_version = {ver_s}")
+          print(f"::notice::PRE row counts = {json.dumps(counts)}")
+          print(f"::notice::PRE exam_attempts has questions_snapshot = {'questions_snapshot' in (cols.get('exam_attempts') or [])} | questions has hidden = {'hidden' in (cols.get('questions') or [])}")
           PY
 
       - name: Alembic heads & history (sanity)
@@ -96,7 +105,9 @@ jobs:
 
       - name: Apply migration - alembic upgrade ${{ inputs.target || 'head' }}
         working-directory: backend
-        run: alembic upgrade ${{ inputs.target || 'head' }}
+        run: |
+          alembic upgrade ${{ inputs.target || 'head' }}
+          echo "::notice::APPLY OK - alembic upgrade ${{ inputs.target || 'head' }} exited 0"
 
       - name: Post-check (READ-ONLY) - revision, columns, counts, backfill
         working-directory: backend
@@ -118,11 +129,13 @@ jobs:
               # Columns introduced by migration a3f1c9d24e75 (commit 4f2dc63):
               # exam_attempts.questions_snapshot + questions.hidden. Versioning
               # is encoded by the immutable snapshot itself.
+              present = {}
               for table, col in (
                   ("exam_attempts", "questions_snapshot"),
                   ("questions", "hidden"),
               ):
                   ok = any(x["name"] == col for x in insp.get_columns(table))
+                  present[f"{table}.{col}"] = ok
                   print(f"column {table}.{col}: {'EXISTS' if ok else 'MISSING'}")
                   if not ok:
                       failures.append(f"{table}.{col} missing")
@@ -140,10 +153,14 @@ jobs:
               if filled != total:
                   failures.append(f"backfill incomplete: {filled}/{total}")
 
+          print(f"::notice::POST alembic_version = {ver}")
+          print(f"::notice::POST columns = {json.dumps(present)}")
+          print(f"::notice::POST row counts = {json.dumps(counts)}")
+          print(f"::notice::POST backfill = {filled}/{total} attempts have snapshots")
           if failures:
-              print("::error::Post-check FAILED:", "; ".join(failures))
+              print("::error::Post-check FAILED: " + "; ".join(failures))
               sys.exit(1)
-          print("POST-CHECK PASSED: schema migrated, columns present, backfill complete.")
+          print("::notice::POST-CHECK PASSED - schema migrated, columns present, backfill complete, no data lost")
           PY
 
       - name: Smoke - production healthz (from GitHub's network)
@@ -152,3 +169,4 @@ jobs:
           echo "healthz -> HTTP $code"
           cat /tmp/health.json 2>/dev/null || true
           echo
+          echo "::notice::HEALTHZ https://ms-eman-chi.vercel.app/healthz -> HTTP $code"
