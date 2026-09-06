@@ -39,4 +39,34 @@ export const examsApi = {
     request<Question>(`/questions/${qid}`, { method: 'PUT', body: q }),
   deleteQuestion: (qid: string) =>
     request<void>(`/questions/${qid}`, { method: 'DELETE' }),
+  reorderQuestions: (id: string, ordered_ids: string[]) =>
+    request<{ message: string }>(`/exams/${id}/questions/reorder`, {
+      method: 'PUT',
+      body: { ordered_ids },
+    }),
+  preview: (id: string) =>
+    request<{
+      exam_id: string;
+      title: string;
+      description: string;
+      instructions: string;
+      duration_minutes: number;
+      status: string;
+      max_score: number;
+      // Sanitized student-view questions (no correct answers). Read-only:
+      // fetching a preview never creates a student attempt.
+      questions: Array<{
+        id: string;
+        type: QuestionType;
+        text: string;
+        marks: number;
+        data: {
+          type: string;
+          options?: Array<{ id: string; text: string; order_index: number }>;
+          tokens?: Array<{ id: string; text: string }>;
+          sentence?: string;
+          brackets?: Array<{ id: string; original_word: string }>;
+        };
+      }>;
+    }>(`/exams/${id}/preview`),
 };

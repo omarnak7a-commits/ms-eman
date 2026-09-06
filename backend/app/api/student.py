@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..core.exceptions import AuthenticationError, ConflictError, NotFoundError, AuthorizationError
 from ..db.session import get_db
-from ..repositories import attempt_repo, question_repo, exam_repo
+from ..repositories import attempt_repo
 from ..schemas.attempt import (
     AnswerOut,
     AnswerUpsert,
@@ -21,7 +21,10 @@ from ..schemas.attempt import (
     StartAttemptResponse,
 )
 from ..services.attempt_service import AttemptService
-from ..services.question_service import student_payload as _student_payload
+from ..services.question_service import (
+    correct_answer_payload as _correct_answer_payload,
+    student_payload as _student_payload,
+)
 
 router = APIRouter(prefix="/api", tags=["student"])
 _bearer = HTTPBearer(auto_error=False)
@@ -57,7 +60,11 @@ def resume_attempt(attempt_id: str, db: Session = Depends(get_db), token: str = 
     status = svc.status_out(attempt)
     if not status["can_resume"]:
         return {"status": status, "can_resume": False}
-    questions = [_student_payload(q) for q in question_repo.get_for_exam(db, attempt.exam_id)]
+    # The attempt's FROZEN exam version — resume must show exactly the
+    # questions the student started with, even if the teacher edited the
+    # live exam since. (Sanitized by student_payload: no correct answers.)
+    by_id = {q.id: q for q in svc.attempt_questions(attempt)}
+    questions = [_student_payload(q) for q in by_id.values()]
     answers = attempt_repo.list_answers(db, attempt.id)
     return {
         "status": status,
@@ -68,6 +75,13 @@ def resume_attempt(attempt_id: str, db: Session = Depends(get_db), token: str = 
                 "question_id": a.question_id,
                 "answer_data": a.answer_data,
                 "is_correct": a.is_correct,
+                # Same post-grading feedback already shown at submit time: the
+                # correct answer for an INCORRECT submission. Graded answers
+                # only, so a refresh never reveals anything pre-submission.
+                "correct_answer": (
+                    _correct_answer_payload(by_id[a.question_id])
+                    if a.is_correct is False else None
+                ),
             }
             for a in answers
         ],

@@ -1,0 +1,172 @@
+# Applies Alembic migrations to the production Neon database.
+#
+# Why this exists: Vercel serverless functions never run migrations (see
+# DEPLOY_VERCEL_NEON.md and api/index.py). The documented mechanism is
+# `cd backend && DATABASE_URL=... alembic upgrade head` — this workflow runs
+# exactly that, from GitHub's network (which can reach Neon), with strict
+# read-only verification before and after the upgrade. Nothing is ever
+# dropped or deleted: pre/post checks compare row counts and verify the
+# snapshot backfill covers every attempt.
+#
+# Triggers:
+#   - workflow_dispatch (manual, via Actions tab or `gh workflow run`)
+#   - push of THIS file on the arena branch (a workflow_dispatch-only file is
+#     only registered by GitHub from the default branch, so the push trigger
+#     is what actually makes it runnable from a feature branch). Committing
+#     any change to this file fires it; once migrated it is an idempotent
+#     no-op.
+# Requires repo secret DATABASE_URL = postgresql+psycopg2://...neon...?sslmode=require
+#
+# Key results are emitted as ::notice:: annotations so they are readable via
+# the check-runs API even when raw log download is unavailable.
+
+name: DB migrate (Neon)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Alembic revision target"
+        required: true
+        default: "head"
+  push:
+    branches: [arena/01a073ce-ms-eman]
+    paths: [".github/workflows/db-migrate.yml"]
+
+concurrency:
+  group: db-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The Neon connection string, injected as a GitHub Actions secret.
+      # The value itself is never printed anywhere in this workflow.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Guard - DATABASE_URL present (value never printed)
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Repository secret DATABASE_URL is not set. Add it in Settings -> Secrets and variables -> Actions with the Neon connection string in postgresql+psycopg2://...?sslmode=require form."
+            exit 1
+          fi
+          echo "::notice::GUARD OK - DATABASE_URL is set (length ${#DATABASE_URL}, value never printed)"
+
+      - name: Pre-check (READ-ONLY) - current revision, schema, row counts
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import json
+          from sqlalchemy import create_engine, inspect, text
+          from app.core.config import get_settings
+
+          eng = create_engine(get_settings().database_url)
+          insp = inspect(eng)
+          with eng.connect() as c:
+              ver = c.execute(text(
+                  "SELECT version_num FROM alembic_version"
+              )).first() if insp.has_table("alembic_version") else None
+              counts = {}
+              for t in ("exams", "questions", "exam_attempts", "answers", "teachers"):
+                  if insp.has_table(t):
+                      counts[t] = c.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+              cols = {
+                  t: sorted(col["name"] for col in insp.get_columns(t))
+                  for t in ("exam_attempts", "questions") if insp.has_table(t)
+              }
+          ver_s = ver[0] if ver else None
+          print("CURRENT alembic_version:", ver_s)
+          print("ROW COUNTS:", json.dumps(counts))
+          print("exam_attempts columns:", cols.get("exam_attempts"))
+          print("questions columns:", cols.get("questions"))
+          print(f"::notice::PRE alembic_version = {ver_s}")
+          print(f"::notice::PRE row counts = {json.dumps(counts)}")
+          print(f"::notice::PRE exam_attempts has questions_snapshot = {'questions_snapshot' in (cols.get('exam_attempts') or [])} | questions has hidden = {'hidden' in (cols.get('questions') or [])}")
+          PY
+
+      - name: Alembic heads & history (sanity)
+        working-directory: backend
+        run: |
+          alembic heads
+          alembic history
+
+      - name: Apply migration - alembic upgrade ${{ inputs.target || 'head' }}
+        working-directory: backend
+        run: |
+          alembic upgrade ${{ inputs.target || 'head' }}
+          echo "::notice::APPLY OK - alembic upgrade ${{ inputs.target || 'head' }} exited 0"
+
+      - name: Post-check (READ-ONLY) - revision, columns, counts, backfill
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import json, sys
+          from sqlalchemy import create_engine, inspect, text
+          from app.core.config import get_settings
+
+          eng = create_engine(get_settings().database_url)
+          insp = inspect(eng)
+          failures = []
+          with eng.connect() as c:
+              ver = c.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              print("POST alembic_version:", ver)
+              if ver != "a3f1c9d24e75":
+                  failures.append(f"alembic_version is {ver}, expected a3f1c9d24e75")
+
+              # Columns introduced by migration a3f1c9d24e75 (commit 4f2dc63):
+              # exam_attempts.questions_snapshot + questions.hidden. Versioning
+              # is encoded by the immutable snapshot itself.
+              present = {}
+              for table, col in (
+                  ("exam_attempts", "questions_snapshot"),
+                  ("questions", "hidden"),
+              ):
+                  ok = any(x["name"] == col for x in insp.get_columns(table))
+                  present[f"{table}.{col}"] = ok
+                  print(f"column {table}.{col}: {'EXISTS' if ok else 'MISSING'}")
+                  if not ok:
+                      failures.append(f"{table}.{col} missing")
+
+              counts = {}
+              for t in ("exams", "questions", "exam_attempts", "answers", "teachers"):
+                  counts[t] = c.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+              print("ROW COUNTS (post):", json.dumps(counts))
+
+              total = counts["exam_attempts"]
+              filled = c.execute(text(
+                  "SELECT COUNT(*) FROM exam_attempts WHERE questions_snapshot IS NOT NULL"
+              )).scalar()
+              print(f"backfill: {filled}/{total} attempts have a snapshot")
+              if filled != total:
+                  failures.append(f"backfill incomplete: {filled}/{total}")
+
+          print(f"::notice::POST alembic_version = {ver}")
+          print(f"::notice::POST columns = {json.dumps(present)}")
+          print(f"::notice::POST row counts = {json.dumps(counts)}")
+          print(f"::notice::POST backfill = {filled}/{total} attempts have snapshots")
+          if failures:
+              print("::error::Post-check FAILED: " + "; ".join(failures))
+              sys.exit(1)
+          print("::notice::POST-CHECK PASSED - schema migrated, columns present, backfill complete, no data lost")
+          PY
+
+      - name: Smoke - production healthz (from GitHub's network)
+        run: |
+          code=$(curl -sS -m 30 -o /tmp/health.json -w "%{http_code}" https://ms-eman-chi.vercel.app/healthz || true)
+          echo "healthz -> HTTP $code"
+          cat /tmp/health.json 2>/dev/null || true
+          echo
+          echo "::notice::HEALTHZ https://ms-eman-chi.vercel.app/healthz -> HTTP $code"

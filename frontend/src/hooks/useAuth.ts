@@ -1,6 +1,12 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { Teacher } from '@/types';
-import { login as authLogin, logout as authLogout, getSession } from '@/lib/auth';
+import {
+  login as authLogin,
+  logout as authLogout,
+  getSession,
+  clearSession as authClearSession,
+} from '@/lib/auth';
+import { getAccessToken, getRefreshToken, onTeacherSessionInvalidated } from '@/lib/api/client';
 
 /**
  * Teacher session, held in ONE module-level store shared by every `useAuth()`
@@ -30,7 +36,18 @@ const listeners = new Set<() => void>();
 function getSnapshot(): Teacher | null {
   // Lazily hydrate from the cached profile on first read, then keep a stable
   // reference so useSyncExternalStore does not loop.
-  if (currentTeacher === undefined) currentTeacher = getSession();
+  if (currentTeacher === undefined) {
+    // Stale-cache hygiene: a cached profile with NO tokens left in storage
+    // (tokens cleared, private-browsing tab loss, manual wipe) can never
+    // authenticate. Treat it as signed out immediately instead of letting
+    // every protected page mount and 401 first.
+    if (!getAccessToken() && !getRefreshToken()) {
+      authClearSession();
+      currentTeacher = null;
+    } else {
+      currentTeacher = getSession();
+    }
+  }
   return currentTeacher;
 }
 
@@ -44,6 +61,25 @@ function subscribe(listener: () => void): () => void {
   return () => {
     listeners.delete(listener);
   };
+}
+
+// When the API layer decides a teacher session is unrecoverable (401 with no
+// working refresh), it fires this hook. Resetting the SHARED store here is
+// what flips ProtectedRoute to signed-out and routes the teacher to /login —
+// and what guarantees the login page never bounces back to /dashboard.
+onTeacherSessionInvalidated(() => {
+  authClearSession();
+  setTeacher(null);
+});
+
+/**
+ * Test seam only: forget the in-memory session so the next snapshot read
+ * re-hydrates from storage — exactly what a real page reload does. Without
+ * this, jsdom tests would share one store across simulated "page loads".
+ */
+export function __resetAuthStoreForTests(): void {
+  currentTeacher = undefined;
+  for (const listener of listeners) listener();
 }
 
 export function useAuth() {

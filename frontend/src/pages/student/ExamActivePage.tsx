@@ -7,7 +7,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { QuestionPrompt } from '@/components/QuestionPrompt';
 import { ExamTeacherName } from '@/components/ExamTeacherName';
-import type { AnswerData } from '@/types';
+import type { AnswerData, CorrectAnswerPayload } from '@/types';
 
 // State for a question's answer. An answer only ever reaches the server when
 // the student presses "Submit Answer"; after that it is locked and graded.
@@ -15,6 +15,11 @@ interface AnswerEntry {
   data: AnswerData;
   submitted: boolean;
   is_correct: boolean | null;
+  /**
+   * Server-provided correct answer — arrives ONLY in the grading result of an
+   * INCORRECT submission. The frontend never computes or derives it.
+   */
+  correct_answer: CorrectAnswerPayload | null;
 }
 
 function isAnswerEmpty(data?: AnswerData | null): boolean {
@@ -28,6 +33,21 @@ function isAnswerEmpty(data?: AnswerData | null): boolean {
   return true;
 }
 
+/**
+ * An answer is *complete* when the server can actually grade it. Ordering
+ * requires every token exactly once (the backend rejects partial sequences),
+ * so a partially-arranged draft must not be submittable — otherwise the
+ * student taps "Submit Answer" and only gets a confusing error back.
+ */
+function isAnswerComplete(data: AnswerData | undefined, question: StudentQuestion): boolean {
+  if (!data || isAnswerEmpty(data)) return false;
+  if (data.type === 'ordering') {
+    const total = question.data.tokens?.length ?? 0;
+    return data.token_ids.length === total;
+  }
+  return true;
+}
+
 function errMsg(e: unknown): string {
   return (e as { message?: string })?.message || 'Something went wrong.';
 }
@@ -37,31 +57,43 @@ function errMsg(e: unknown): string {
 function MCQAnswer({ question, selected, onAnswer, disabled }: {
   question: StudentQuestion;
   selected: string | null;
-  onAnswer: (data: AnswerData) => void;
+  onAnswer: (data: AnswerData | null) => void;
   disabled: boolean;
 }) {
   if (!question.data.options) return null;
   return (
     <div className="space-y-3">
-      {question.data.options.map((opt, i) => (
-        <button
-          key={opt.id}
-          onClick={() => !disabled && onAnswer({ type: 'multiple_choice', selected_option_id: opt.id })}
-          disabled={disabled}
-          className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-all ${
-            selected === opt.id
-              ? 'border-blue-500 bg-blue-50 text-blue-800'
-              : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
-          } disabled:cursor-default`}
-        >
-          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-            selected === opt.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-          }`}>
-            {String.fromCharCode(65 + i)}
-          </span>
-          <span className="text-sm font-medium">{opt.text}</span>
-        </button>
-      ))}
+      {question.data.options.map((opt, i) => {
+        const isSelected = selected === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => {
+              if (disabled) return;
+              // Tapping the already-selected option clears the (still
+              // unsubmitted) draft so the student can walk away from the
+              // question without being forced to submit something.
+              if (isSelected) onAnswer(null);
+              else onAnswer({ type: 'multiple_choice', selected_option_id: opt.id });
+            }}
+            disabled={disabled}
+            aria-pressed={isSelected}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-all ${
+              isSelected
+                ? 'border-blue-500 bg-blue-50 text-blue-800'
+                : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
+            } disabled:cursor-default`}
+          >
+            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+              isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {String.fromCharCode(65 + i)}
+            </span>
+            <span className="text-sm font-medium">{opt.text}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -153,47 +185,188 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
 }
 
 // ─── Correct Brackets answer ──────────────────────────────────────────────────
+// Exam-paper style: the full sentence reads as plain text with the bracketed
+// words kept visible (highlighted, but NOT interactive and NOT replaced by
+// inputs). The student writes each correction in its own input BELOW the
+// sentence — one per bracketed word, in the same order as the sentence.
 
-function BracketsAnswer({ question, value, onAnswer, disabled }: {
+// Splits "She (go) to school." into plain parts and "(go)" parts.
+const BRACKET_SPLIT = /(\([^)]+\))/g;
+const BRACKET_TEST = /^\([^)]+\)$/;
+
+function BracketsAnswer({ question, values, onChange, disabled }: {
   question: StudentQuestion;
-  value: string;
-  onAnswer: (data: AnswerData) => void;
+  /** One value per bracket, in sentence order. */
+  values: string[];
+  onChange: (next: string[]) => void;
   disabled: boolean;
 }) {
-  const parts = (question.data.sentence || '').split(/(\\([^)]+\\))/g);
+  const brackets = question.data.brackets || [];
+  const parts = (question.data.sentence || '').split(BRACKET_SPLIT);
+  const multi = brackets.length > 1;
+  const setValue = (idx: number, v: string) => {
+    const next = values.slice();
+    while (next.length < brackets.length) next.push('');
+    next[idx] = v;
+    onChange(next);
+  };
+  const hasAnything = values.some(v => v && v.trim());
+
   return (
     <div>
-      <div className="mb-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-800 leading-relaxed">
-        {parts.map((part, i) => {
-          if (/^\\([^)]+\\)$/.test(part)) {
-            return <span key={i} className="font-semibold text-blue-700 bg-blue-100 px-1 rounded">{part}</span>;
-          }
-          return <span key={i}>{part}</span>;
-        })}
-      </div>
-      <input
-        type="text"
-        value={value}
-        onChange={e => onAnswer({ type: 'correct_brackets', answer: e.target.value })}
-        disabled={disabled}
-        placeholder="Type the correct word…"
+      {/* The sentence — natural reading text; bracketed words stay visible. */}
+      <p
+        data-testid="brackets-sentence"
         dir="auto"
-        className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-sm focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400 transition-colors"
-      />
+        className="mb-4 px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-xl text-base text-slate-800 leading-relaxed"
+      >
+        {parts.map((part, i) =>
+          BRACKET_TEST.test(part) ? (
+            <strong key={i} className="font-bold text-blue-700">{part}</strong>
+          ) : (
+            <span key={i}>{part}</span>
+          ),
+        )}
+      </p>
+
+      {/* The answer inputs — below the sentence, one per bracketed word. */}
+      <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">
+        {multi ? 'Your answers' : 'Your answer'}
+      </p>
+      {multi && (
+        <p className="text-xs text-slate-400 mb-3">
+          Write the correct form of each bracketed word, in order.
+        </p>
+      )}
+      <div className="space-y-3">
+        {brackets.map((b, idx) => (
+          <div key={b.id}>
+            {multi && (
+              <p className="text-xs font-semibold text-slate-500 mb-1" dir="auto">
+                Correction of <span className="text-blue-700">({b.original_word})</span>
+              </p>
+            )}
+            <input
+              type="text"
+              value={values[idx] || ''}
+              onChange={e => setValue(idx, e.target.value)}
+              disabled={disabled}
+              placeholder="Type the correction…"
+              dir="auto"
+              aria-label={`Correction for (${b.original_word})`}
+              className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500 transition-colors"
+            />
+          </div>
+        ))}
+      </div>
+      {!disabled && hasAnything && (
+        <button
+          type="button"
+          onClick={() => onChange(brackets.map(() => ''))}
+          className="mt-3 px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+        >
+          Clear
+        </button>
+      )}
     </div>
   );
 }
 
-// ─── Feedback badge ────────────────────────────────────────────────────────────
+// ─── Answer feedback (unified grading-result panel) ───────────────────────────
+// One model for every question type:
+//
+//   Submit Answer → backend grading → ✓ Correct / ✕ Incorrect
+//                     and, when incorrect, the correct answer exactly as the
+//                     server graded it (never computed on the client).
+//
+// Shown after "Submit Answer" and restored from resume after a refresh.
 
-function FeedbackBadge({ isCorrect }: { isCorrect: boolean | null }) {
-  if (isCorrect === null) return null;
+/** Renders the server-provided correct answer in the shape of its question. */
+function CorrectAnswerReveal({ question, payload }: {
+  question: StudentQuestion;
+  payload: CorrectAnswerPayload;
+}) {
+  if (payload.type === 'multiple_choice') {
+    const correct = (payload.options || []).filter(o =>
+      (payload.correct_option_ids || []).includes(o.id));
+    return (
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Correct answer</p>
+        <p className="text-sm font-bold text-slate-800" dir="auto">
+          {correct.map(o => o.text).join(' / ') || '—'}
+        </p>
+      </div>
+    );
+  }
+  if (payload.type === 'ordering') {
+    return (
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Correct order</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(payload.correct_tokens || []).map((t, i) => (
+            <span
+              key={i}
+              className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-800"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // correct_brackets — listed in the same order as the bracketed words.
+  const items = (question.data.brackets || [])
+    .map(b => ((payload.accepted_answers || {})[b.id] || []).join(' / '));
   return (
-    <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold ${
-      isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
-    }`}>
-      <span className="text-lg leading-none">{isCorrect ? '✓' : '✗'}</span>
-      <span>{isCorrect ? 'Correct' : 'Incorrect'}</span>
+    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
+        {items.length > 1 ? 'Correct answers' : 'Correct answer'}
+      </p>
+      {items.length <= 1 ? (
+        <p className="text-sm font-bold text-slate-800" dir="auto">{items[0] || '—'}</p>
+      ) : (
+        <ol className="space-y-1.5">
+          {items.map((text, i) => (
+            <li key={i} className="flex items-center gap-2.5 text-sm font-bold text-slate-800">
+              <span className="w-5 h-5 rounded-full bg-red-50 border border-red-200 text-red-600 text-[11px] font-bold flex items-center justify-center shrink-0">
+                {i + 1}
+              </span>
+              <span dir="auto">{text || '—'}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function AnswerFeedback({ question, entry }: { question: StudentQuestion; entry: AnswerEntry }) {
+  if (entry.is_correct === null) return null;
+  const isCorrect = entry.is_correct === true;
+  return (
+    <div
+      role="status"
+      className={`rounded-xl border-2 px-4 py-3.5 ${
+        isCorrect ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-base font-black text-white shrink-0 ${
+          isCorrect ? 'bg-green-600' : 'bg-red-500'
+        }`}>
+          {isCorrect ? '✓' : '✕'}
+        </span>
+        <div>
+          <p className={`text-sm font-bold ${isCorrect ? 'text-green-700' : 'text-red-700'}`}>
+            {isCorrect ? 'Correct' : 'Incorrect'}
+          </p>
+          <p className="text-xs text-slate-500 flex items-center gap-1">🔒 Answer submitted and locked</p>
+        </div>
+      </div>
+      {!isCorrect && entry.correct_answer && (
+        <CorrectAnswerReveal question={question} payload={entry.correct_answer} />
+      )}
     </div>
   );
 }
@@ -210,7 +383,7 @@ export function ExamActivePage() {
   const [title, setTitle] = useState('');
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, AnswerEntry>>({});
-  const [deadline, setDeadline] = useState<string | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [submitConfirm, setSubmitConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -235,13 +408,25 @@ export function ExamActivePage() {
           return;
         }
         setTitle(status.exam_title || '');
-        setDeadline(status.deadline_at);
+        // whatsapp-exam-bot timing model: the countdown seeds from the
+        // server-computed remaining seconds (integer) — the deadline string
+        // is never parsed by the timer. Refresh/resume re-seeds the true
+        // remaining time, so reloading can never reset the clock.
+        setRemainingSeconds(
+          typeof status.remaining_seconds === 'number' ? status.remaining_seconds : null,
+        );
         setQuestions(r.questions || []);
         // Answers already stored on the server were submitted before a refresh,
-        // so restore them as locked with their grading feedback.
+        // so restore them as locked with their grading feedback (including the
+        // server's correct answer for incorrect submissions).
         const map: Record<string, AnswerEntry> = {};
         (r.answers || []).forEach(a => {
-          map[a.question_id] = { data: a.answer_data, submitted: true, is_correct: a.is_correct ?? null };
+          map[a.question_id] = {
+            data: a.answer_data,
+            submitted: true,
+            is_correct: a.is_correct ?? null,
+            correct_answer: a.correct_answer ?? null,
+          };
         });
         setAnswers(map);
         setCurrentIdx(0);
@@ -254,7 +439,7 @@ export function ExamActivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
-  const { secondsLeft, isExpired, formatted } = useExamTimer(deadline);
+  const { secondsLeft, isExpired, formatted } = useExamTimer(remainingSeconds);
 
   const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;
@@ -276,15 +461,17 @@ export function ExamActivePage() {
     }
   }, [id, token, navigate, submitting]);
 
-  // Auto-submit the whole exam only when the server-authoritative deadline
-  // actually expires. Armed only once a real, positive remaining time is seen
-  // (so a fresh active attempt is never submitted on load).
+  // Auto-submit the whole exam only when the server-authoritative time
+  // actually runs out. Armed only once a real, positive server-seeded
+  // remaining time is seen (so a fresh active attempt is never submitted on
+  // load) — mirroring the reference's "status === IN_PROGRESS" countdown
+  // guard. The backend enforces the deadline regardless; this is display+UX.
   const autoArmed = useRef(false);
   const autoFired = useRef(false);
   useEffect(() => {
-    if (loading || !deadline) return;
+    if (loading || remainingSeconds === null) return;
     if (!isExpired) autoArmed.current = true;
-  }, [loading, deadline, isExpired]);
+  }, [loading, remainingSeconds, isExpired]);
   useEffect(() => {
     if (!autoArmed.current) return;
     if (isExpired && !autoFired.current) {
@@ -301,29 +488,51 @@ export function ExamActivePage() {
 
   const selectedOption = currentData?.type === 'multiple_choice' ? currentData.selected_option_id : null;
   const ordered = currentData?.type === 'ordering' ? currentData.token_ids : [];
-  const bracketValue = currentData?.type === 'correct_brackets'
-    ? (Array.isArray(currentData.answer) ? currentData.answer.join(', ') : currentData.answer)
-    : '';
+  const bracketValues: string[] = (() => {
+    if (currentData?.type !== 'correct_brackets') return [];
+    const raw = currentData.answer;
+    if (Array.isArray(raw)) return raw.map(v => String(v ?? ''));
+    return raw ? [String(raw)] : [];
+  })();
 
   const submittedCount = Object.values(answers).filter(a => a.submitted).length;
   const submittedIds = new Set(Object.entries(answers).filter(([, v]) => v.submitted).map(([qid]) => qid));
   const draftIds = new Set(Object.entries(answers).filter(([, v]) => !v.submitted && !isAnswerEmpty(v.data)).map(([qid]) => qid));
 
   // ── Local editing (never sent until "Submit Answer") ──────────────────────
-  const editAnswer = useCallback((questionId: string, data: AnswerData) => {
+  const editAnswer = useCallback((questionId: string, data: AnswerData | null) => {
     setAnswers(prev => {
       const existing = prev[questionId];
       if (existing?.submitted) return prev; // locked on the server; cannot change
-      return { ...prev, [questionId]: { data, submitted: false, is_correct: null } };
+      if (data === null) {
+        // Draft cleared (e.g. deselected MCQ option) → forget it entirely.
+        if (!existing) return prev;
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      }
+      return { ...prev, [questionId]: { data, submitted: false, is_correct: null, correct_answer: null } };
     });
   }, []);
 
+  // Per-bracket values for correct-the-brackets questions. Single-bracket
+  // answers are stored as a plain string, multi-bracket as a list — exactly
+  // the shapes the backend validates and grades.
+  const setBracketValues = useCallback((question: StudentQuestion, values: string[]) => {
+    const count = question.data.brackets?.length ?? 0;
+    const padded = Array.from({ length: count }, (_, i) => values[i] ?? '');
+    const data: AnswerData = count === 1
+      ? { type: 'correct_brackets', answer: padded[0] ?? '' }
+      : { type: 'correct_brackets', answer: padded };
+    editAnswer(question.id, isAnswerEmpty(data) ? null : data);
+  }, [editAnswer]);
+
   const canSubmitCurrent = !!currentQ && !!currentEntry && !currentEntry.submitted
-    && !isAnswerEmpty(currentEntry.data) && !isExpired && !submittingAnswer;
+    && isAnswerComplete(currentEntry.data, currentQ) && !isExpired && !submittingAnswer;
 
   const submitCurrentAnswer = useCallback(async () => {
     if (!currentQ || !currentEntry || currentEntry.submitted) return;
-    if (isAnswerEmpty(currentEntry.data)) return;
+    if (!isAnswerComplete(currentEntry.data, currentQ)) return;
     if (isExpired) {
       setSaveError('Time is up — no more answers can be submitted.');
       return;
@@ -334,7 +543,13 @@ export function ExamActivePage() {
       const saved = await attemptsApi.saveAnswer(id!, currentQ.id, token, currentEntry.data);
       setAnswers(prev => ({
         ...prev,
-        [currentQ.id]: { data: currentEntry.data, submitted: true, is_correct: saved.is_correct },
+        [currentQ.id]: {
+          data: currentEntry.data,
+          submitted: true,
+          is_correct: saved.is_correct,
+          // Server's grading result — the ONLY source of the correct answer.
+          correct_answer: saved.correct_answer ?? null,
+        },
       }));
     } catch (e) {
       setSaveError(errMsg(e) || 'Failed to submit your answer. Please try again.');
@@ -343,10 +558,13 @@ export function ExamActivePage() {
     }
   }, [currentQ, currentEntry, id, token, isExpired]);
 
-  // ── Navigation: cannot leave while the current question has an unsubmitted answer ──
+  // ── Navigation: cannot leave while the current question has an unsubmitted
+  // answer — otherwise a tap-away would silently abandon what the student
+  // typed/selected. The student must Submit Answer (locks + grades it) or
+  // clear the draft first. Blank questions are always skippable.
   const tryNavigate = useCallback((idx: number) => {
     if (currentQ && currentDraft) {
-      setSaveError('Submit your answer before moving on.');
+      setSaveError('You have an unsubmitted answer on this question. Press "Submit Answer" to save it, or clear it before moving to another question.');
       return;
     }
     setSaveError('');
@@ -391,7 +609,23 @@ export function ExamActivePage() {
       </div>
 
       {saveError && (
-        <div className="mb-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{saveError}</div>
+        <div className="mb-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5" role="alert">{saveError}</div>
+      )}
+
+      {/* Progress (answered count + bar), like the reference solving UX. */}
+      {questions.length > 0 && (
+        <div className="mb-3">
+          <div className="h-2 bg-slate-200/70 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-l from-blue-600 to-teal-500 rounded-full transition-all duration-500"
+              style={{ width: `${Math.round((submittedCount / questions.length) * 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs text-slate-400 mt-1">
+            <span>{submittedCount} answered</span>
+            <span>{questions.length - submittedCount} remaining</span>
+          </div>
+        </div>
       )}
 
       <div className="flex flex-wrap gap-1.5 mb-5">
@@ -446,24 +680,38 @@ export function ExamActivePage() {
             <OrderingAnswer question={currentQ} arranged={ordered} onAnswer={d => editAnswer(currentQ.id, d)} disabled={currentLocked} />
           )}
           {currentQ.type === 'correct_brackets' && (
-            <BracketsAnswer question={currentQ} value={bracketValue} onAnswer={d => editAnswer(currentQ.id, d)} disabled={currentLocked} />
+            <BracketsAnswer
+              question={currentQ}
+              values={bracketValues}
+              onChange={vals => setBracketValues(currentQ, vals)}
+              disabled={currentLocked}
+            />
           )}
 
-          <div className="mt-5 flex flex-col items-stretch sm:items-end gap-3">
+          <div className="mt-5 flex flex-col items-stretch gap-3">
             {currentEntry?.submitted ? (
-              <div className="w-full sm:w-auto flex flex-col gap-2 items-stretch sm:items-end">
-                <div className="w-full sm:w-56"><FeedbackBadge isCorrect={currentEntry.is_correct} /></div>
-                <span className="text-xs text-slate-400 inline-flex items-center gap-1 justify-end">🔒 Answer locked</span>
-              </div>
+              <AnswerFeedback question={currentQ} entry={currentEntry} />
             ) : (
-              <button
-                type="button"
-                onClick={submitCurrentAnswer}
-                disabled={!canSubmitCurrent}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {submittingAnswer ? 'Submitting…' : 'Submit Answer'}
-              </button>
+              <>
+                {currentQ.type === 'ordering' && currentDraft && !canSubmitCurrent && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    Place every word first — the answer needs all {currentQ.data.tokens?.length ?? 0} words before you can submit it.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={submitCurrentAnswer}
+                  disabled={!canSubmitCurrent}
+                  className="w-full px-6 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {submittingAnswer ? 'Submitting…' : 'Submit Answer'}
+                </button>
+                {!currentDraft && !isExpired && (
+                  <p className="text-xs text-slate-400 text-center">
+                    Pick or write your answer, then press Submit Answer. You can skip this question and come back to it later.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -487,7 +735,18 @@ export function ExamActivePage() {
         )}
       </div>
 
-      {currentIdx < questions.length - 1 && (
+      {/* All questions submitted → prominent finish action (reference UX). */}
+      {questions.length > 0 && submittedCount === questions.length && (
+        <button
+          onClick={() => setSubmitConfirm(true)}
+          disabled={submitting}
+          className="w-full mt-4 py-3.5 bg-gradient-to-l from-blue-600 to-teal-500 text-white font-bold rounded-2xl text-base shadow-lg shadow-blue-200 disabled:opacity-60"
+        >
+          {submitting ? 'Submitting…' : 'Finish Exam ✓'}
+        </button>
+      )}
+
+      {currentIdx < questions.length - 1 && submittedCount < questions.length && (
         <div className="mt-4 text-center">
           <button onClick={() => setSubmitConfirm(true)} disabled={submitting}
             className="text-sm text-slate-500 underline hover:text-red-600">

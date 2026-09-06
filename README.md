@@ -169,7 +169,21 @@ Creates the demo teacher **and a sample exam**:
 
 ```bash
 cd backend
-python -m pytest            # 39 tests covering auth, grading, deadlines, security
+python -m pytest            # 50 tests covering auth, grading, deadlines, security
+```
+
+#### Student UI interaction tests (frontend)
+
+The student solving flow (question → answer → Submit Answer → server grading →
+Correct/Incorrect feedback → lock, plus navigation guards and refresh restore)
+is covered by a jsdom test harness that mounts the REAL React pages and drives
+them with real browser-like events against the live local backend:
+
+```bash
+# Terminal 1 — backend must be running on http://127.0.0.1:8000 (SQLite dev DB)
+# Terminal 2
+cd frontend
+npx vitest run src/test/studentFlow.test.tsx
 ```
 
 ### Run against PostgreSQL

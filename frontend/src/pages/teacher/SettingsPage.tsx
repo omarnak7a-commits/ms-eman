@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getSession, logout } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 import { changePassword } from '@/lib/api/auth';
 
 export function SettingsPage() {
-  const teacher = getSession();
+  // Shared auth store: logout here must reset isAuthenticated globally,
+  // otherwise /login immediately redirects back into the dashboard.
+  const { teacher, logout } = useAuth();
   const navigate = useNavigate();
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');

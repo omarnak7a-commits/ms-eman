@@ -338,7 +338,11 @@ export function ExamDetailPage() {
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
 
-  const canEdit = isNew || examStatus === 'draft';
+  // Published/active exams stay editable: attempts pin their own snapshot
+  // of the exam at start time, so editing never changes a student's
+  // in-progress or past attempt. Only closed exams are locked.
+  const canEdit = isNew || examStatus !== 'closed';
+  const attemptCount = (exam as { attempt_count?: number }).attempt_count ?? 0;
 
   useEffect(() => {
     if (isNew) return;
@@ -426,7 +430,18 @@ export function ExamDetailPage() {
     return errs.concat(validateQuestions());
   };
 
-  /** Persist exam details + full question set (draft editing). Returns the saved exam. */
+  /**
+   * Persist exam details + question set with a DIFF-based sync:
+   *   • questions still present → updated in place (ids stay stable),
+   *   • removed questions       → deleted (the backend soft-deletes any that
+   *                               already have student answers),
+   *   • added questions         → created,
+   *   • display order           → saved for every question.
+   *
+   * The old delete-everything-then-recreate approach is gone: it handed out
+   * new question ids on every save and could cascade-delete answers of
+   * attempts that referenced a deleted question.
+   */
   const persist = useCallback(async (): Promise<{ examId: string; slugStr: string }> => {
     const fields = {
       title: exam.title,
@@ -448,13 +463,20 @@ export function ExamDetailPage() {
       const updated = await examsApi.update(id!, fields as Partial<Exam>);
       examId = updated.id;
       savedSlug = updated.slug;
-      // Replace existing questions with current local set (guarantees order).
-      const existing = await examsApi.questions(examId);
-      for (const q of existing) await examsApi.deleteQuestion(q.id);
     }
 
-    const createdQs: Question[] = [];
+    const existing = isNew ? [] : await examsApi.questions(examId);
+    const existingIds = new Set(existing.map(q => q.id));
+    const keptIds = new Set(questions.filter(q => existingIds.has(q.id)).map(q => q.id));
+
+    const syncedQs: Question[] = [];
+    const finalOrder: string[] = [];
     try {
+      // 1) Drop questions removed locally (safe: backend soft-deletes answered ones).
+      for (const q of existing) {
+        if (!keptIds.has(q.id)) await examsApi.deleteQuestion(q.id);
+      }
+      // 2) Update kept questions in place / create new ones.
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         // For ordering/correct-brackets the fixed header is shown automatically,
@@ -463,14 +485,22 @@ export function ExamDetailPage() {
         // de-duplicate it, so it is never shown twice.
         const fixedHeader = FIXED_QUESTION_HEADERS[q.type];
         const text = q.text?.trim() ? q.text : (fixedHeader ?? q.text);
-        createdQs.push(await examsApi.addQuestion(examId, {
-          type: q.type,
-          text,
-          marks: q.marks,
-          order_index: i,
-          data: q.data as unknown as Record<string, unknown>,
-        }));
+        const data = q.data as unknown as Record<string, unknown>;
+        if (existingIds.has(q.id)) {
+          syncedQs.push(await examsApi.updateQuestion(q.id, {
+            text, marks: q.marks, order_index: i, data: q.data,
+          }));
+          finalOrder.push(q.id);
+        } else {
+          const created = await examsApi.addQuestion(examId, {
+            type: q.type, text, marks: q.marks, order_index: i, data,
+          });
+          syncedQs.push(created);
+          finalOrder.push(created.id);
+        }
       }
+      // 3) Persist the authoritative display order.
+      if (finalOrder.length > 0) await examsApi.reorderQuestions(examId, finalOrder);
     } catch (err) {
       // Keep Create atomic at the UI level: if adding questions fails on a
       // freshly-created exam, remove the partial exam so no orphan draft is
@@ -483,7 +513,7 @@ export function ExamDetailPage() {
 
     setSlug(savedSlug);
     if (!isNew) {
-      setQuestions(createdQs);
+      setQuestions(syncedQs);
       const fresh = await examsApi.get(examId);
       setExamStatus(fresh.status);
       setExam(fresh);
@@ -609,6 +639,20 @@ export function ExamDetailPage() {
               </Link>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Versioning notice: attempts pin their own exam version. */}
+      {!isNew && attemptCount > 0 && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+          <p className="text-amber-800 font-semibold text-sm mb-1">
+            {attemptCount} attempt{attemptCount !== 1 ? 's' : ''} on this exam — versioning is active
+          </p>
+          <p className="text-amber-700 text-xs leading-relaxed">
+            Students who already started keep the exact exam version they began with
+            (questions, order and correct answers). Your changes apply to students
+            who start after you save.
+          </p>
         </div>
       )}
 
@@ -769,6 +813,14 @@ export function ExamDetailPage() {
             Publish Exam
           </button>
         )}
+        {!isNew && (
+          <Link
+            to={`/exams/${id}/preview`}
+            className="px-5 py-2.5 border border-blue-200 text-blue-700 rounded-xl text-sm font-medium hover:bg-blue-50 transition-colors"
+          >
+            Preview Exam
+          </Link>
+        )}
         {!isNew && examStatus === 'published' && (
           <button
             onClick={() => setCloseConfirm(true)}
@@ -785,7 +837,11 @@ export function ExamDetailPage() {
       <ConfirmDialog
         open={publishConfirm}
         title="Publish Exam"
-        message="This will make the exam available to students. Are you ready to publish?"
+        message={
+          attemptCount > 0
+            ? 'Students already in an attempt keep their current exam version. New students will see the updated exam. Publish now?'
+            : 'This will make the exam available to students. Are you ready to publish?'
+        }
         confirmLabel="Publish"
         onConfirm={confirmPublish}
         onCancel={() => setPublishConfirm(false)}

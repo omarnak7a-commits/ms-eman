@@ -19,7 +19,13 @@ class StartAttemptResponse(BaseModel):
     exam_slug: str
     status: AttemptStatus
     started_at: datetime
-    deadline_at: datetime
+    # Canonical ISO-8601 UTC ("Z") string — see timeutil.iso_utc_z. A plain
+    # `datetime` field serialises to engine-dependent shapes that strict
+    # mobile JS engines fail to parse (timer stuck at 00:00).
+    deadline_at: str
+    # Server-authoritative remaining time at the moment of the response; the
+    # client seeds its countdown from this instead of re-parsing dates.
+    remaining_seconds: int
     duration_seconds: int
     # Bearer token used to authorize all student calls for this attempt.
     student_token: str
@@ -43,7 +49,10 @@ class AttemptStatusOut(BaseModel):
     exam_id: str
     status: AttemptStatus
     started_at: datetime
-    deadline_at: datetime
+    # Canonical ISO-8601 UTC ("Z") — same mobile-safe contract as
+    # StartAttemptResponse (see timeutil.iso_utc_z).
+    deadline_at: str
+    remaining_seconds: int = 0
     submitted_at: datetime | None
     can_resume: bool
 
@@ -62,6 +71,11 @@ class AnswerOut(BaseModel):
     # Present only for immediate correct/incorrect feedback during the attempt.
     # It never reveals the correct answer itself.
     is_correct: bool | None = None
+    # Server-provided correct answer, delivered ONLY as part of the grading
+    # result after the student submits an incorrect answer (see
+    # question_service.correct_answer_payload). It never appears before
+    # submission — start/resume question payloads stay sanitized.
+    correct_answer: dict[str, Any] | None = None
     answered_at: datetime
     updated_at: datetime
 

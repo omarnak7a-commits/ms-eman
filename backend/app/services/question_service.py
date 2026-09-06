@@ -119,12 +119,13 @@ def teacher_payload(question: Question) -> dict[str, Any]:
     }
 
 
-def student_payload(question: Question) -> dict[str, Any]:
+def student_payload(question: Question, *, shuffle: bool = True) -> dict[str, Any]:
     """Sanitised serialization for an in-progress attempt.
 
     Correct answers, correct positions and accepted answers are stripped.
     Ordering tokens are also shuffled so the sequence cannot be read off the
-    array order.
+    array order (pass ``shuffle=False`` for deterministic views such as the
+    teacher's exam preview).
     """
     base = {
         "id": question.id,
@@ -142,7 +143,8 @@ def student_payload(question: Question) -> dict[str, Any]:
 
     if question.type == "ordering":
         tokens = [{"id": o["id"], "text": o["text"]} for o in data.get("tokens", [])]
-        random.shuffle(tokens)
+        if shuffle:
+            random.shuffle(tokens)
         return {**base, "data": {"type": "ordering", "tokens": tokens}}
 
     # correct_brackets

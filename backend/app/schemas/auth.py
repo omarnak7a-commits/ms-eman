@@ -29,8 +29,13 @@ class TokenPair(BaseModel):
 
 class TokenRefreshResponse(BaseModel):
     access_token: str
+    # Refresh tokens are ROTATED on every use: the presented token is revoked
+    # and this fresh one must replace it client-side. Without this field the
+    # client keeps the already-revoked token and its next refresh attempt
+    # dies with 401, stranding the teacher mid-session.
+    refresh_token: str
     token_type: str = "bearer"
-    expires_in: int
+    expires_in: int  # seconds
 
 
 class TeacherOut(BaseModel):

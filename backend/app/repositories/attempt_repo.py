@@ -38,6 +38,7 @@ def create(
     student_id: str,
     started_at: datetime,
     deadline_at: datetime,
+    questions_snapshot: list | None = None,
 ) -> ExamAttempt:
     a = ExamAttempt(
         exam_id=exam_id,
@@ -45,6 +46,9 @@ def create(
         status="active",
         started_at=started_at,
         deadline_at=deadline_at,
+        # Immutable exam version this attempt is pinned to (see
+        # services.snapshot). Everything attempt-scoped reads from it.
+        questions_snapshot=questions_snapshot,
     )
     db.add(a)
     db.flush()

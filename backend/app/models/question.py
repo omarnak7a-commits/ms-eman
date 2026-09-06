@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, IdMixin, TimestampMixin, utcnow
@@ -24,6 +24,12 @@ class Question(Base, IdMixin, TimestampMixin):
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     marks: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    # Soft-delete flag: set instead of a hard delete when student answers
+    # already reference the question (answers cascade-delete on hard delete,
+    # which would destroy grading history). Hidden questions are excluded
+    # from every live listing (editor, start payload, counts) but remain in
+    # the snapshots of attempts that pinned them.
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
