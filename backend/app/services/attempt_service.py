@@ -22,6 +22,7 @@ from ..core.timeutil import ensure_utc, iso_utc_z
 from ..models.base import utcnow
 from ..models import Answer, Exam, ExamAttempt, Question
 from ..repositories import attempt_repo, exam_repo, question_repo, student_repo
+from ..services.question_service import correct_answer_payload
 from ..schemas.attempt import (
     ReviewAnswerItem,
     ReviewResponse,
@@ -247,7 +248,10 @@ class AttemptService:
             answer_data=validated,
             answered_at=now,
         )
-        # Server-graded immediate feedback (Correct/Incorrect only).
+        # Server-graded immediate feedback: Correct/Incorrect verdict plus —
+        # for an INCORRECT submission — the correct answer the grading relied
+        # on (same payload builder the post-submission review uses). Nothing
+        # here is ever sent before the student submits.
         outcome = grade_question(question, validated)
         answer.is_correct = outcome.is_correct
         answer.awarded_marks = outcome.awarded_marks
@@ -259,6 +263,9 @@ class AttemptService:
             "question_id": answer.question_id,
             "answer_data": answer.answer_data,
             "is_correct": answer.is_correct,
+            "correct_answer": (
+                None if outcome.is_correct else correct_answer_payload(question)
+            ),
             "answered_at": answer.answered_at,
             "updated_at": answer.updated_at,
         }

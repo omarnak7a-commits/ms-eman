@@ -1,4 +1,4 @@
-import type { AnswerData } from '@/types';
+import type { AnswerData, CorrectAnswerPayload } from '@/types';
 import { request } from './client';
 import { storageGet, storageSet } from '@/lib/storage';
 
@@ -75,6 +75,11 @@ export interface SavedAnswer {
   question_id: string;
   answer_data: AnswerData;
   is_correct: boolean | null;
+  /**
+   * Server-provided correct answer — part of the grading result, present only
+   * when the submitted answer was incorrect. Never sent before submission.
+   */
+  correct_answer?: CorrectAnswerPayload | null;
   answered_at: string;
   updated_at: string;
 }
@@ -140,6 +145,8 @@ export const attemptsApi = {
         question_id: string;
         answer_data: AnswerData;
         is_correct: boolean | null;
+        /** Same post-grading feedback shown at submit time (incorrect only). */
+        correct_answer?: CorrectAnswerPayload | null;
       }>;
     }>(`/attempts/${attemptId}/resume`, { auth: 'student', token }),
   saveAnswer: (attemptId: string, questionId: string, token: string, answer_data: AnswerData) =>

@@ -7,7 +7,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { QuestionPrompt } from '@/components/QuestionPrompt';
 import { ExamTeacherName } from '@/components/ExamTeacherName';
-import type { AnswerData } from '@/types';
+import type { AnswerData, CorrectAnswerPayload } from '@/types';
 
 // State for a question's answer. An answer only ever reaches the server when
 // the student presses "Submit Answer"; after that it is locked and graded.
@@ -15,6 +15,11 @@ interface AnswerEntry {
   data: AnswerData;
   submitted: boolean;
   is_correct: boolean | null;
+  /**
+   * Server-provided correct answer — arrives ONLY in the grading result of an
+   * INCORRECT submission. The frontend never computes or derives it.
+   */
+  correct_answer: CorrectAnswerPayload | null;
 }
 
 function isAnswerEmpty(data?: AnswerData | null): boolean {
@@ -180,10 +185,12 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
 }
 
 // ─── Correct Brackets answer ──────────────────────────────────────────────────
+// Exam-paper style: the full sentence reads as plain text with the bracketed
+// words kept visible (highlighted, but NOT interactive and NOT replaced by
+// inputs). The student writes each correction in its own input BELOW the
+// sentence — one per bracketed word, in the same order as the sentence.
 
-// Splits "She (go) to school." into plain parts and "(go)" parts. The old
-// pattern searched for backslash-escaped brackets (\(...\)) which never occur
-// in stored sentences, so bracketed words were never highlighted.
+// Splits "She (go) to school." into plain parts and "(go)" parts.
 const BRACKET_SPLIT = /(\([^)]+\))/g;
 const BRACKET_TEST = /^\([^)]+\)$/;
 
@@ -196,7 +203,7 @@ function BracketsAnswer({ question, values, onChange, disabled }: {
 }) {
   const brackets = question.data.brackets || [];
   const parts = (question.data.sentence || '').split(BRACKET_SPLIT);
-  let bracketIdx = -1;
+  const multi = brackets.length > 1;
   const setValue = (idx: number, v: string) => {
     const next = values.slice();
     while (next.length < brackets.length) next.push('');
@@ -207,36 +214,56 @@ function BracketsAnswer({ question, values, onChange, disabled }: {
 
   return (
     <div>
-      <div className="mb-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-800 leading-loose">
-        {parts.map((part, i) => {
-          if (BRACKET_TEST.test(part)) {
-            bracketIdx += 1;
-            const idx = bracketIdx;
-            return (
-              <span key={i} className="inline-flex items-center gap-1 align-baseline whitespace-nowrap">
-                <span className="font-semibold text-blue-700">({part.slice(1, -1)})</span>
-                <span aria-hidden="true" className="text-slate-400">→</span>
-                <input
-                  type="text"
-                  value={values[idx] || ''}
-                  onChange={e => setValue(idx, e.target.value)}
-                  disabled={disabled}
-                  placeholder="correction…"
-                  dir="auto"
-                  aria-label={`Correction for bracketed word ${part}`}
-                  className="inline-block w-32 sm:w-40 px-3 py-1.5 rounded-lg border-2 border-slate-200 text-sm focus:outline-none focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-500 transition-colors"
-                />
-              </span>
-            );
-          }
-          return <span key={i}>{part}</span>;
-        })}
+      {/* The sentence — natural reading text; bracketed words stay visible. */}
+      <p
+        data-testid="brackets-sentence"
+        dir="auto"
+        className="mb-4 px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-xl text-base text-slate-800 leading-relaxed"
+      >
+        {parts.map((part, i) =>
+          BRACKET_TEST.test(part) ? (
+            <strong key={i} className="font-bold text-blue-700">{part}</strong>
+          ) : (
+            <span key={i}>{part}</span>
+          ),
+        )}
+      </p>
+
+      {/* The answer inputs — below the sentence, one per bracketed word. */}
+      <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">
+        {multi ? 'Your answers' : 'Your answer'}
+      </p>
+      {multi && (
+        <p className="text-xs text-slate-400 mb-3">
+          Write the correct form of each bracketed word, in order.
+        </p>
+      )}
+      <div className="space-y-3">
+        {brackets.map((b, idx) => (
+          <div key={b.id}>
+            {multi && (
+              <p className="text-xs font-semibold text-slate-500 mb-1" dir="auto">
+                Correction of <span className="text-blue-700">({b.original_word})</span>
+              </p>
+            )}
+            <input
+              type="text"
+              value={values[idx] || ''}
+              onChange={e => setValue(idx, e.target.value)}
+              disabled={disabled}
+              placeholder="Type the correction…"
+              dir="auto"
+              aria-label={`Correction for (${b.original_word})`}
+              className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500 transition-colors"
+            />
+          </div>
+        ))}
       </div>
       {!disabled && hasAnything && (
         <button
           type="button"
           onClick={() => onChange(brackets.map(() => ''))}
-          className="px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+          className="mt-3 px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
         >
           Clear
         </button>
@@ -245,31 +272,101 @@ function BracketsAnswer({ question, values, onChange, disabled }: {
   );
 }
 
-// ─── Feedback panel ────────────────────────────────────────────────────────────
-// Shown after "Submit Answer": the server's verdict (Correct / Incorrect) and
-// the lock notice. Deliberately prominent — the solving flow is
-// Question → answer → Submit Answer → server grades → feedback → locked.
+// ─── Answer feedback (unified grading-result panel) ───────────────────────────
+// One model for every question type:
+//
+//   Submit Answer → backend grading → ✓ Correct / ✕ Incorrect
+//                     and, when incorrect, the correct answer exactly as the
+//                     server graded it (never computed on the client).
+//
+// Shown after "Submit Answer" and restored from resume after a refresh.
 
-function FeedbackPanel({ isCorrect }: { isCorrect: boolean | null }) {
-  if (isCorrect === null) return null;
+/** Renders the server-provided correct answer in the shape of its question. */
+function CorrectAnswerReveal({ question, payload }: {
+  question: StudentQuestion;
+  payload: CorrectAnswerPayload;
+}) {
+  if (payload.type === 'multiple_choice') {
+    const correct = (payload.options || []).filter(o =>
+      (payload.correct_option_ids || []).includes(o.id));
+    return (
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Correct answer</p>
+        <p className="text-sm font-bold text-slate-800" dir="auto">
+          {correct.map(o => o.text).join(' / ') || '—'}
+        </p>
+      </div>
+    );
+  }
+  if (payload.type === 'ordering') {
+    return (
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Correct order</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(payload.correct_tokens || []).map((t, i) => (
+            <span
+              key={i}
+              className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-800"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // correct_brackets — listed in the same order as the bracketed words.
+  const items = (question.data.brackets || [])
+    .map(b => ((payload.accepted_answers || {})[b.id] || []).join(' / '));
+  return (
+    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
+        {items.length > 1 ? 'Correct answers' : 'Correct answer'}
+      </p>
+      {items.length <= 1 ? (
+        <p className="text-sm font-bold text-slate-800" dir="auto">{items[0] || '—'}</p>
+      ) : (
+        <ol className="space-y-1.5">
+          {items.map((text, i) => (
+            <li key={i} className="flex items-center gap-2.5 text-sm font-bold text-slate-800">
+              <span className="w-5 h-5 rounded-full bg-red-50 border border-red-200 text-red-600 text-[11px] font-bold flex items-center justify-center shrink-0">
+                {i + 1}
+              </span>
+              <span dir="auto">{text || '—'}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function AnswerFeedback({ question, entry }: { question: StudentQuestion; entry: AnswerEntry }) {
+  if (entry.is_correct === null) return null;
+  const isCorrect = entry.is_correct === true;
   return (
     <div
       role="status"
-      className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 ${
+      className={`rounded-xl border-2 px-4 py-3.5 ${
         isCorrect ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
       }`}
     >
-      <span className={`w-8 h-8 rounded-full flex items-center justify-center text-base font-black text-white shrink-0 ${
-        isCorrect ? 'bg-green-600' : 'bg-red-500'
-      }`}>
-        {isCorrect ? '✓' : '✗'}
-      </span>
-      <div>
-        <p className={`text-sm font-bold ${isCorrect ? 'text-green-700' : 'text-red-700'}`}>
-          {isCorrect ? 'Correct answer' : 'Incorrect answer'}
-        </p>
-        <p className="text-xs text-slate-500 flex items-center gap-1">🔒 Answer submitted and locked</p>
+      <div className="flex items-center gap-3">
+        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-base font-black text-white shrink-0 ${
+          isCorrect ? 'bg-green-600' : 'bg-red-500'
+        }`}>
+          {isCorrect ? '✓' : '✕'}
+        </span>
+        <div>
+          <p className={`text-sm font-bold ${isCorrect ? 'text-green-700' : 'text-red-700'}`}>
+            {isCorrect ? 'Correct' : 'Incorrect'}
+          </p>
+          <p className="text-xs text-slate-500 flex items-center gap-1">🔒 Answer submitted and locked</p>
+        </div>
       </div>
+      {!isCorrect && entry.correct_answer && (
+        <CorrectAnswerReveal question={question} payload={entry.correct_answer} />
+      )}
     </div>
   );
 }
@@ -320,10 +417,16 @@ export function ExamActivePage() {
         );
         setQuestions(r.questions || []);
         // Answers already stored on the server were submitted before a refresh,
-        // so restore them as locked with their grading feedback.
+        // so restore them as locked with their grading feedback (including the
+        // server's correct answer for incorrect submissions).
         const map: Record<string, AnswerEntry> = {};
         (r.answers || []).forEach(a => {
-          map[a.question_id] = { data: a.answer_data, submitted: true, is_correct: a.is_correct ?? null };
+          map[a.question_id] = {
+            data: a.answer_data,
+            submitted: true,
+            is_correct: a.is_correct ?? null,
+            correct_answer: a.correct_answer ?? null,
+          };
         });
         setAnswers(map);
         setCurrentIdx(0);
@@ -408,7 +511,7 @@ export function ExamActivePage() {
         delete next[questionId];
         return next;
       }
-      return { ...prev, [questionId]: { data, submitted: false, is_correct: null } };
+      return { ...prev, [questionId]: { data, submitted: false, is_correct: null, correct_answer: null } };
     });
   }, []);
 
@@ -440,7 +543,13 @@ export function ExamActivePage() {
       const saved = await attemptsApi.saveAnswer(id!, currentQ.id, token, currentEntry.data);
       setAnswers(prev => ({
         ...prev,
-        [currentQ.id]: { data: currentEntry.data, submitted: true, is_correct: saved.is_correct },
+        [currentQ.id]: {
+          data: currentEntry.data,
+          submitted: true,
+          is_correct: saved.is_correct,
+          // Server's grading result — the ONLY source of the correct answer.
+          correct_answer: saved.correct_answer ?? null,
+        },
       }));
     } catch (e) {
       setSaveError(errMsg(e) || 'Failed to submit your answer. Please try again.');
@@ -581,7 +690,7 @@ export function ExamActivePage() {
 
           <div className="mt-5 flex flex-col items-stretch gap-3">
             {currentEntry?.submitted ? (
-              <FeedbackPanel isCorrect={currentEntry.is_correct} />
+              <AnswerFeedback question={currentQ} entry={currentEntry} />
             ) : (
               <>
                 {currentQ.type === 'ordering' && currentDraft && !canSubmitCurrent && (

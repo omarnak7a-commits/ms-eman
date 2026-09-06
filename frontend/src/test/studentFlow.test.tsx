@@ -174,14 +174,19 @@ describe('Student solving flow (real UI + real backend)', () => {
     // Change the draft before submitting.
     await user.click(screen.getByText('going'));
 
-    // Submit Answer → server grades → Incorrect feedback + lock.
+    // Submit Answer → server grades → Incorrect feedback + lock, with the
+    // server's correct answer revealed immediately.
     await user.click(screen.getByRole('button', { name: /submit answer/i }));
-    await screen.findByText(/^incorrect answer$/i, undefined, { timeout: 10000 });
+    await screen.findByText(/^incorrect$/i, undefined, { timeout: 10000 });
     await screen.findByText(/submitted and locked/i);
+    await screen.findByText(/correct answer/i);
 
-    // The Submit Answer button is gone now; options are disabled.
+    // The Submit Answer button is gone now; options are disabled. ('goes' now
+    // appears twice: as an option AND in the revealed correct answer.)
     expect(screen.queryByRole('button', { name: /submit answer/i })).toBeNull();
-    const optGoes = screen.getByText('goes').closest('button')!;
+    const optGoes = screen.getAllByText('goes')
+      .map(el => el.closest('button'))
+      .find(b => b !== null)!;
     expect((optGoes as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -222,7 +227,7 @@ describe('Student solving flow (real UI + real backend)', () => {
       await user.click(btn);
     }
     await user.click(screen.getByRole('button', { name: /submit answer/i }));
-    await screen.findByText(/^correct answer$/i, undefined, { timeout: 10000 });
+    await screen.findByText(/^correct$/i, undefined, { timeout: 10000 });
     await screen.findByText(/submitted and locked/i);
 
     // Tokens no longer interactive after lock.
@@ -237,7 +242,7 @@ describe('Student solving flow (real UI + real backend)', () => {
     const input = await screen.findByPlaceholderText(/correction/i);
     await user.type(input, 'goes');
     await user.click(screen.getByRole('button', { name: /submit answer/i }));
-    await screen.findByText(/^correct answer$/i, undefined, { timeout: 10000 });
+    await screen.findByText(/^correct$/i, undefined, { timeout: 10000 });
     await screen.findByText(/submitted and locked/i);
     expect((input as HTMLInputElement).disabled).toBe(true);
   });
@@ -259,18 +264,20 @@ describe('Student solving flow (real UI + real backend)', () => {
     const user = userEvent.setup();
     await startAttemptPage();
 
-    // Q1 feedback visible immediately after resume (locked + Incorrect).
-    await screen.findByText(/^incorrect answer$/i);
+    // Q1 feedback visible immediately after resume (locked + Incorrect, with
+    // the server's correct answer restored from the resume payload).
+    await screen.findByText(/^incorrect$/i);
     await screen.findByText(/submitted and locked/i);
+    await screen.findByText(/correct answer/i);
 
     // Q2 still locked + Correct.
     await user.click(screen.getByRole('button', { name: /^Question 2/ }));
-    await screen.findByText(/^correct answer$/i);
+    await screen.findByText(/^correct$/i);
     await screen.findByText(/submitted and locked/i);
 
     // Q3 still locked + Correct.
     await user.click(screen.getByRole('button', { name: /^Question 3/ }));
-    await screen.findByText(/^correct answer$/i);
+    await screen.findByText(/^correct$/i);
 
     // Q4 still blank, editable, nothing auto-submitted server-side.
     await user.click(screen.getByRole('button', { name: /^Question 4/ }));
@@ -394,7 +401,7 @@ describe('Multi-bracket + input guards (real UI + real backend)', () => {
     await user.type(inputs[0], 'goes');
     await user.type(inputs[1], 'the school');
     await user.click(screen.getByRole('button', { name: /submit answer/i }));
-    await screen.findByText(/^correct answer$/i, undefined, { timeout: 10000 });
+    await screen.findByText(/^correct$/i, undefined, { timeout: 10000 });
     await screen.findByText(/submitted and locked/i);
 
     // Server stored the list-shaped answer and graded it correct.

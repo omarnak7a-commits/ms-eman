@@ -94,10 +94,26 @@ export interface Answer {
   question_id: string;
   answer_data: AnswerData;
   is_correct: boolean | null;
+  /** Present only in the grading result of an incorrect submission. */
+  correct_answer?: CorrectAnswerPayload | null;
   awarded_marks: number;
   answered_at: string;
   updated_at: string;
 }
+
+/**
+ * Server-provided correct answer. Delivered ONLY as part of a grading result
+ * after the student submits an incorrect answer — never before submission.
+ * Mirrors backend `question_service.correct_answer_payload`.
+ */
+export type CorrectAnswerPayload =
+  | {
+      type: 'multiple_choice';
+      options: Array<{ id: string; text: string; order_index: number; is_correct?: boolean }>;
+      correct_option_ids: string[];
+    }
+  | { type: 'ordering'; correct_token_ids: string[]; correct_tokens: string[] }
+  | { type: 'correct_brackets'; accepted_answers: Record<string, string[]> };
 
 export type AnswerData =
   | { type: 'multiple_choice'; selected_option_id: string }

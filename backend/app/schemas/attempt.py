@@ -71,6 +71,11 @@ class AnswerOut(BaseModel):
     # Present only for immediate correct/incorrect feedback during the attempt.
     # It never reveals the correct answer itself.
     is_correct: bool | None = None
+    # Server-provided correct answer, delivered ONLY as part of the grading
+    # result after the student submits an incorrect answer (see
+    # question_service.correct_answer_payload). It never appears before
+    # submission — start/resume question payloads stay sanitized.
+    correct_answer: dict[str, Any] | None = None
     answered_at: datetime
     updated_at: datetime
 
