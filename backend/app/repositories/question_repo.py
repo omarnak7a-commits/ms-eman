@@ -1,21 +1,23 @@
 """Question data access."""
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from ..models import Question
+from ..models import Answer, Question
 
 
 def get_by_id(db: Session, question_id: str) -> Question | None:
     return db.get(Question, question_id)
 
 
-def get_for_exam(db: Session, exam_id: str) -> list[Question]:
+def get_for_exam(db: Session, exam_id: str, *, include_hidden: bool = False) -> list[Question]:
+    """Live (non-soft-deleted) questions unless explicitly asked otherwise."""
+    stmt = select(Question).where(Question.exam_id == exam_id)
+    if not include_hidden:
+        stmt = stmt.where(Question.hidden.is_(False))
     return db.execute(
-        select(Question)
-        .where(Question.exam_id == exam_id)
-        .order_by(Question.order_index, Question.created_at)
+        stmt.order_by(Question.order_index, Question.created_at)
     ).scalars().all()
 
 
@@ -47,6 +49,17 @@ def add(db: Session, q: Question) -> None:
 def delete(db: Session, q: Question) -> None:
     db.delete(q)
     db.flush()
+
+
+def has_answers(db: Session, question_id: str) -> bool:
+    """True when any student answer references the question — such questions
+    must be soft-deleted (hidden), because answers cascade on hard delete and
+    would take grading history with them."""
+    return bool(
+        db.execute(
+            select(func.count(Answer.id)).where(Answer.question_id == question_id)
+        ).scalar_one()
+    )
 
 
 def next_order_index(db: Session, exam_id: str) -> int:

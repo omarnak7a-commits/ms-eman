@@ -32,6 +32,9 @@ from ..schemas.attempt import (
 from ..services.grading_service import grade_question
 from ..services.question_service import student_payload
 from ..services.ranking_service import RankingService
+from ..services.snapshot import SnapshotQuestion, build_snapshot
+from ..services.snapshot import find as snapshot_find
+from ..services.snapshot import hydrate as snapshot_hydrate
 from ..services.student_service import find_or_create
 
 
@@ -98,17 +101,21 @@ class AttemptService:
 
         started = utcnow()
         deadline = started + timedelta(minutes=exam.duration_minutes)
+        # Freeze the exam version this student is taking: the full visible
+        # question set (incl. correct answers for grading) is snapshotted
+        # onto the attempt. Later teacher edits never touch this attempt.
+        questions = question_repo.get_for_exam(self.db, exam.id)
         attempt = attempt_repo.create(
             self.db,
             exam_id=exam.id,
             student_id=student.id,
             started_at=started,
             deadline_at=deadline,
+            questions_snapshot=build_snapshot(questions),
         )
         token = self._issue_student_token(attempt.id)
         self.db.commit()
 
-        questions = question_repo.get_for_exam(self.db, exam.id)
         payload = [
             student_payload(q) for q in questions
         ]
@@ -164,6 +171,16 @@ class AttemptService:
         if payload.get("type") != "student_attempt":
             raise AuthenticationError("Invalid attempt session.")
         return payload["sub"]
+
+    # ----------------------------------------------------- exam versioning
+    def attempt_questions(self, attempt: ExamAttempt) -> list[SnapshotQuestion]:
+        """The FROZEN question set of an attempt — never the live exam.
+
+        Display, validation, grading and review all go through this, so an
+        attempt keeps exactly the exam version the student started with,
+        even if the teacher edits, reorders or deletes questions later.
+        """
+        return snapshot_hydrate(attempt, question_repo.get_for_exam(self.db, attempt.exam_id))
 
     # ------------------------------------------------------------ reconcile
     def reconcile(self, attempt: ExamAttempt) -> ExamAttempt:
@@ -227,8 +244,11 @@ class AttemptService:
             self.db.commit()
             raise ConflictError("Time is up — the attempt was auto-submitted.")
 
-        question = question_repo.get_by_id(self.db, question_id)
-        if not question or question.exam_id != attempt.exam_id:
+        # Validate + grade against the attempt's FROZEN version: a question
+        # must be part of the snapshot the student started with. (The live
+        # table may have moved on — edits must never affect this attempt.)
+        question = snapshot_find(self.attempt_questions(attempt), question_id)
+        if not question:
             raise NotFoundError("Question does not belong to this exam.")
 
         # Strict one-shot lock: an answer is graded and stored the first time it
@@ -318,8 +338,12 @@ class AttemptService:
         return {"attempt_id": attempt.id, "status": attempt.status}
 
     def _finalize(self, attempt: ExamAttempt, *, submitted_at, status: str) -> None:
-        """Grade all answers and store authoritative totals + ranking."""
-        questions = question_repo.get_for_exam(self.db, attempt.exam_id)
+        """Grade all answers and store authoritative totals + ranking.
+
+        Grading runs against the attempt's frozen snapshot, so results are
+        immune to any teacher edits made after the student started.
+        """
+        questions = self.attempt_questions(attempt)
         answers = attempt_repo.list_answers(self.db, attempt.id)
         answer_by_q = {a.question_id: a for a in answers}
 
@@ -401,7 +425,7 @@ class AttemptService:
 
     # ------------------------------------------------------------ results
     def submitted_out(self, attempt: ExamAttempt, include_name: bool = True) -> dict:
-        questions = question_repo.get_for_exam(self.db, attempt.exam_id)
+        questions = self.attempt_questions(attempt)
         answers = attempt_repo.list_answers(self.db, attempt.id)
         answer_by_q = {a.question_id: a for a in answers}
         correct = 0
@@ -467,7 +491,8 @@ class AttemptService:
     def _review_payload(self, attempt: ExamAttempt) -> dict:
         from ..services.question_service import correct_answer_payload
 
-        questions = question_repo.get_for_exam(self.db, attempt.exam_id)
+        # Review reflects the version the student actually took.
+        questions = self.attempt_questions(attempt)
         answers = attempt_repo.list_answers(self.db, attempt.id)
         answer_by_q = {a.question_id: a for a in answers}
         items = []

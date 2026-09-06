@@ -8,6 +8,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Index,
 )
@@ -42,6 +43,14 @@ class ExamAttempt(Base, IdMixin, TimestampMixin):
     percentage: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     time_used_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Immutable exam version this attempt started with: the full visible
+    # question set (id, type, text, marks, order_index, data — including
+    # correct answers, needed for grading) frozen at start time. Every
+    # attempt-scoped operation (resume display, validation, grading, review)
+    # reads from this snapshot, so later teacher edits NEVER change an
+    # in-progress or past attempt. NULL only for legacy rows created before
+    # versioning existed (the migration backfills them).
+    questions_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )

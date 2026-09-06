@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..core.exceptions import AuthenticationError, ConflictError, NotFoundError, AuthorizationError
 from ..db.session import get_db
-from ..repositories import attempt_repo, question_repo, exam_repo
+from ..repositories import attempt_repo
 from ..schemas.attempt import (
     AnswerOut,
     AnswerUpsert,
@@ -60,7 +60,10 @@ def resume_attempt(attempt_id: str, db: Session = Depends(get_db), token: str = 
     status = svc.status_out(attempt)
     if not status["can_resume"]:
         return {"status": status, "can_resume": False}
-    by_id = {q.id: q for q in question_repo.get_for_exam(db, attempt.exam_id)}
+    # The attempt's FROZEN exam version — resume must show exactly the
+    # questions the student started with, even if the teacher edited the
+    # live exam since. (Sanitized by student_payload: no correct answers.)
+    by_id = {q.id: q for q in svc.attempt_questions(attempt)}
     questions = [_student_payload(q) for q in by_id.values()]
     answers = attempt_repo.list_answers(db, attempt.id)
     return {

@@ -10,6 +10,7 @@ import { LoginPage } from '@/pages/teacher/LoginPage';
 import { DashboardPage } from '@/pages/teacher/DashboardPage';
 import { ExamsPage } from '@/pages/teacher/ExamsPage';
 import { ExamDetailPage } from '@/pages/teacher/ExamDetailPage';
+import { ExamPreviewPage } from '@/pages/teacher/ExamPreviewPage';
 import { ExamResultsPage } from '@/pages/teacher/ExamResultsPage';
 import { AttemptDetailPage } from '@/pages/teacher/AttemptDetailPage';
 import { StudentsPage } from '@/pages/teacher/StudentsPage';
@@ -49,6 +50,7 @@ function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/exams" element={<ExamsPage />} />
           <Route path="/exams/:id" element={<ExamDetailPage />} />
+          <Route path="/exams/:id/preview" element={<ExamPreviewPage />} />
           <Route path="/exams/:id/results" element={<ExamResultsPage />} />
           <Route path="/exams/:id/results/:attemptId" element={<AttemptDetailPage />} />
           <Route path="/students" element={<StudentsPage />} />

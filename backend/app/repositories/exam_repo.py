@@ -41,14 +41,19 @@ def delete(db: Session, exam: Exam) -> None:
 
 
 def question_count(db: Session, exam_id: str) -> int:
+    # Hidden (soft-deleted) questions are not part of the live exam.
     return db.execute(
-        select(func.count(Question.id)).where(Question.exam_id == exam_id)
+        select(func.count(Question.id)).where(
+            Question.exam_id == exam_id, Question.hidden.is_(False)
+        )
     ).scalar_one()
 
 
 def max_score(db: Session, exam_id: str) -> float:
     return db.execute(
-        select(func.coalesce(func.sum(Question.marks), 0)).where(Question.exam_id == exam_id)
+        select(func.coalesce(func.sum(Question.marks), 0)).where(
+            Question.exam_id == exam_id, Question.hidden.is_(False)
+        )
     ).scalar_one() or 0
 
 

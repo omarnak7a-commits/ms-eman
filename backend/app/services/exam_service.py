@@ -34,6 +34,14 @@ def require_owned_exam(db: Session, exam_id: str, teacher_id: str) -> Exam:
     return exam
 
 
+def require_owned_editable_exam(db: Session, exam_id: str, teacher_id: str) -> Exam:
+    """Ownership + not-closed check for every question/exam mutation."""
+    exam = require_owned_exam(db, exam_id, teacher_id)
+    if exam.status == "closed":
+        raise ConflictError("A closed exam cannot be edited.")
+    return exam
+
+
 def _out(exam: Exam, db: Session) -> ExamOut:
     payload = ExamOut.model_validate(exam)
     payload.question_count = exam_repo.question_count(db, exam.id)

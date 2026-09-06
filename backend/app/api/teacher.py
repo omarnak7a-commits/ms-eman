@@ -31,8 +31,8 @@ from ..schemas.question import (
 from ..schemas.student import StudentListItem, StudentOut
 from ..schemas.dashboard import DashboardSummary, ExamRow
 from ..services.attempt_service import AttemptService
-from ..services.exam_service import ExamService, require_owned_exam
-from ..services.question_service import teacher_payload, validate_data
+from ..services.exam_service import ExamService, require_owned_editable_exam, require_owned_exam
+from ..services.question_service import student_payload, teacher_payload, validate_data
 from ..services.ranking_service import RankingService
 from ..services.student_service import StudentService
 
@@ -133,7 +133,7 @@ def list_questions(exam_id: str, db: Session = Depends(get_db), teacher: Teacher
 
 @router.post("/exams/{exam_id}/questions", response_model=QuestionOut, status_code=201)
 def create_question(exam_id: str, payload: QuestionCreate, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
-    require_owned_exam(db, exam_id, teacher.id)
+    require_owned_editable_exam(db, exam_id, teacher.id)
     data = validate_data(payload.type, payload.data or {})
     order_index = payload.order_index if payload.order_index is not None else question_repo.next_order_index(db, exam_id)
     q = question_repo.create(
@@ -153,7 +153,7 @@ def _get_owned_question(db: Session, question_id: str, teacher: Teacher) -> Ques
     q = question_repo.get_by_id(db, question_id)
     if not q:
         raise NotFoundError("Question not found.")
-    require_owned_exam(db, q.exam_id, teacher.id)
+    require_owned_editable_exam(db, q.exam_id, teacher.id)
     return q
 
 
@@ -176,14 +176,22 @@ def update_question(question_id: str, payload: QuestionUpdate, db: Session = Dep
 @router.delete("/questions/{question_id}", status_code=204)
 def delete_question(question_id: str, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
     q = _get_owned_question(db, question_id, teacher)
-    question_repo.delete(db, q)
+    if question_repo.has_answers(db, q.id):
+        # Soft delete: student answers (and their grading history) reference
+        # this question, and they cascade on hard delete. Hiding keeps the
+        # row for FK integrity; it disappears from every live listing, while
+        # attempts that pinned it keep it in their snapshot.
+        q.hidden = True
+        db.flush()
+    else:
+        question_repo.delete(db, q)
     db.commit()
     return Response(status_code=204)
 
 
 @router.put("/exams/{exam_id}/questions/reorder", response_model=Message)
 def reorder_questions(exam_id: str, payload: QuestionReorderRequest, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
-    require_owned_exam(db, exam_id, teacher.id)
+    require_owned_editable_exam(db, exam_id, teacher.id)
     existing = {q.id for q in question_repo.get_for_exam(db, exam_id)}
     if set(payload.ordered_ids) != existing:
         from ..core.exceptions import ValidationError
@@ -192,6 +200,28 @@ def reorder_questions(exam_id: str, payload: QuestionReorderRequest, db: Session
     question_repo.reindex(db, exam_id, payload.ordered_ids)
     db.commit()
     return Message(message="Questions reordered.")
+
+
+@router.get("/exams/{exam_id}/preview")
+def preview_exam(exam_id: str, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
+    """Teacher preview of the exam exactly as a student would see it.
+
+    Read-only: no attempt is created and nothing is persisted. Questions are
+    served in the sanitized student shape (no correct answers), with ordering
+    tokens in deterministic order so the preview is stable.
+    """
+    exam = require_owned_exam(db, exam_id, teacher.id)
+    questions = question_repo.get_for_exam(db, exam_id)
+    return {
+        "exam_id": exam.id,
+        "title": exam.title,
+        "description": exam.description,
+        "instructions": exam.instructions,
+        "duration_minutes": exam.duration_minutes,
+        "status": exam.status,
+        "max_score": sum(q.marks for q in questions),
+        "questions": [student_payload(q, shuffle=False) for q in questions],
+    }
 
 
 # ---------------------------------------------------------------- results
