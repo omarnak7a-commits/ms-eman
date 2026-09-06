@@ -286,7 +286,6 @@ export function ExamActivePage() {
   const [title, setTitle] = useState('');
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, AnswerEntry>>({});
-  const [deadline, setDeadline] = useState<string | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [submitConfirm, setSubmitConfirm] = useState(false);
@@ -312,9 +311,10 @@ export function ExamActivePage() {
           return;
         }
         setTitle(status.exam_title || '');
-        setDeadline(status.deadline_at);
-        // Server-authoritative remaining time seeds the countdown so phones
-        // never depend on engine-specific date parsing alone.
+        // whatsapp-exam-bot timing model: the countdown seeds from the
+        // server-computed remaining seconds (integer) — the deadline string
+        // is never parsed by the timer. Refresh/resume re-seeds the true
+        // remaining time, so reloading can never reset the clock.
         setRemainingSeconds(
           typeof status.remaining_seconds === 'number' ? status.remaining_seconds : null,
         );
@@ -336,7 +336,7 @@ export function ExamActivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
-  const { secondsLeft, isExpired, formatted } = useExamTimer(deadline, remainingSeconds);
+  const { secondsLeft, isExpired, formatted } = useExamTimer(remainingSeconds);
 
   const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;
@@ -358,15 +358,17 @@ export function ExamActivePage() {
     }
   }, [id, token, navigate, submitting]);
 
-  // Auto-submit the whole exam only when the server-authoritative deadline
-  // actually expires. Armed only once a real, positive remaining time is seen
-  // (so a fresh active attempt is never submitted on load).
+  // Auto-submit the whole exam only when the server-authoritative time
+  // actually runs out. Armed only once a real, positive server-seeded
+  // remaining time is seen (so a fresh active attempt is never submitted on
+  // load) — mirroring the reference's "status === IN_PROGRESS" countdown
+  // guard. The backend enforces the deadline regardless; this is display+UX.
   const autoArmed = useRef(false);
   const autoFired = useRef(false);
   useEffect(() => {
-    if (loading || !deadline) return;
+    if (loading || remainingSeconds === null) return;
     if (!isExpired) autoArmed.current = true;
-  }, [loading, deadline, isExpired]);
+  }, [loading, remainingSeconds, isExpired]);
   useEffect(() => {
     if (!autoArmed.current) return;
     if (isExpired && !autoFired.current) {
