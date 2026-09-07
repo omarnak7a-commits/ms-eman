@@ -15,20 +15,25 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 sm:p-6 max-h-full overflow-y-auto"
+      >
         <h2 className="text-lg font-semibold text-slate-800 mb-2">{title}</h2>
-        <p className="text-slate-600 text-sm mb-6">{message}</p>
-        <div className="flex gap-3 justify-end">
+        <p className="text-slate-600 text-sm mb-6 break-words">{message}</p>
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
           <button
             onClick={onCancel}
-            className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 sm:py-2 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 rounded-xl text-sm font-medium text-white transition-colors ${
+            className={`w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 sm:py-2 rounded-xl text-sm font-medium text-white transition-colors ${
               danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >

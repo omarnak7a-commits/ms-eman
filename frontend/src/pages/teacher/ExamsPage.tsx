@@ -17,6 +17,7 @@ export function ExamsPage() {
   const [deleteTarget, setDeleteTarget] = useState<ExamApiOut | null>(null);
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const handleCopyLink = async (exam: Exam) => {
     const ok = await copyToClipboard(examStudentUrl(exam.slug));
@@ -68,8 +69,9 @@ export function ExamsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      {/* Header — stacks the Create Exam button under the title on small screens. */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-slate-800">Exams</h1>
           <p className="text-sm text-slate-500 mt-1">
             {exams ? `${exams.length} exam${exams.length !== 1 ? 's' : ''}` : ''}
@@ -77,13 +79,13 @@ export function ExamsPage() {
         </div>
         <Link
           to="/exams/new"
-          className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="inline-flex items-center justify-center w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-blue-600 text-white rounded-xl text-sm font-medium whitespace-nowrap hover:bg-blue-700 transition-colors"
         >
           + Create Exam
         </Link>
       </div>
 
-      {error && <div className="rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm p-4 mb-6">{error}</div>}
+      {error && <div className="rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm p-4 mb-6 break-words">{error}</div>}
 
       {loading ? (
         <LoadingSpinner className="py-16" />
@@ -100,23 +102,32 @@ export function ExamsPage() {
           />
         </div>
       ) : exams ? (
-        <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+        <div className="space-y-3 sm:space-y-0 sm:bg-white sm:rounded-2xl sm:border sm:border-slate-200 sm:divide-y sm:divide-slate-100">
           {exams.map(exam => (
-            <div key={exam.id} className="px-5 py-4 flex items-start gap-3">
+            <article
+              key={exam.id}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:rounded-none sm:border-0 sm:bg-transparent sm:px-5 sm:py-4 sm:flex-row sm:items-start"
+            >
+              {/* Title + metadata */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Link to={`/exams/${exam.id}`} className="font-medium text-slate-800 hover:text-blue-600">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Link
+                    to={`/exams/${exam.id}`}
+                    className="min-w-0 font-medium text-slate-800 hover:text-blue-600 break-words"
+                  >
                     {exam.title}
                   </Link>
                   <ExamStatusBadge status={exam.status} />
                 </div>
-                <div className="text-xs text-slate-500 mt-1 flex gap-3 flex-wrap">
+                <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   <span>{exam.question_count} questions</span>
                   <span>{exam.duration_minutes} min</span>
                   <span>{exam.attempt_count} attempt{exam.attempt_count !== 1 ? 's' : ''}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+
+              {/* Desktop actions — same layout as before (sm and up). */}
+              <div className="hidden sm:flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                 <button
                   type="button"
                   onClick={() => handleCopyLink(exam)}
@@ -158,7 +169,96 @@ export function ExamsPage() {
                   Delete
                 </button>
               </div>
-            </div>
+
+              {/* Mobile actions — roomy row plus an overflow menu for the rest. */}
+              <div className="relative sm:hidden">
+                <div className="flex items-stretch gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyLink(exam)}
+                    disabled={busy}
+                    className="flex-1 inline-flex items-center justify-center px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                    title="Copy student exam link"
+                  >
+                    {copiedId === exam.id ? '✓ Copied!' : 'Copy Link'}
+                  </button>
+                  <Link
+                    to={`/exams/${exam.id}`}
+                    className="flex-1 inline-flex items-center justify-center px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+                    title="Edit exam"
+                  >
+                    Edit
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setOpenMenuId(cur => (cur === exam.id ? null : exam.id))}
+                    className="w-11 inline-flex items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                    aria-label={`More actions for ${exam.title}`}
+                    aria-haspopup="menu"
+                    aria-expanded={openMenuId === exam.id}
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.6" />
+                      <circle cx="12" cy="12" r="1.6" />
+                      <circle cx="19" cy="12" r="1.6" />
+                    </svg>
+                  </button>
+                </div>
+
+                {openMenuId === exam.id && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} aria-hidden="true" />
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-50 mt-2 w-56 max-w-full rounded-xl border border-slate-200 bg-white py-1.5 shadow-lg"
+                    >
+                      <Link
+                        to={`/exams/${exam.id}/preview`}
+                        role="menuitem"
+                        onClick={() => setOpenMenuId(null)}
+                        className="flex w-full items-center px-3.5 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        Preview
+                      </Link>
+                      {exam.status !== 'draft' && (
+                        <Link
+                          to={`/exams/${exam.id}/results`}
+                          role="menuitem"
+                          onClick={() => setOpenMenuId(null)}
+                          className="flex w-full items-center px-3.5 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          Results
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenMenuId(null);
+                          handleDuplicate(exam);
+                        }}
+                        disabled={busy}
+                        className="flex w-full items-center px-3.5 py-2.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Duplicate
+                      </button>
+                      <div className="my-1.5 border-t border-slate-100" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenMenuId(null);
+                          setDeleteTarget(exam);
+                        }}
+                        className="flex w-full items-center px-3.5 py-2.5 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </article>
           ))}
         </div>
       ) : null}
