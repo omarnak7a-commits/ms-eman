@@ -89,3 +89,23 @@ export function storageRemove(key: string): void {
     warnOnce(err);
   }
 }
+
+/** Lists stored keys with the given prefix (memory + persistent, best-effort). */
+export function storageKeys(prefix: string): string[] {
+  const keys = new Set<string>();
+  for (const k of memory.keys()) {
+    if (k.startsWith(prefix)) keys.add(k);
+  }
+  const ls = getPersistentStorage();
+  if (ls) {
+    try {
+      for (let i = 0; i < ls.length; i += 1) {
+        const k = ls.key(i);
+        if (k && k.startsWith(prefix)) keys.add(k);
+      }
+    } catch (err) {
+      warnOnce(err);
+    }
+  }
+  return [...keys];
+}

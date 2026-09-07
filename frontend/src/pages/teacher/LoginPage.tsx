@@ -92,9 +92,11 @@ export function LoginPage() {
             <p className="text-xs text-slate-600">
               Sign in with the account your administrator created for you.
             </p>
-            <p className="text-xs text-slate-400 mt-1">
-              Development seed (if enabled): ms.eman.zahy@test.com
-            </p>
+            {import.meta.env.DEV && (
+              <p className="text-xs text-slate-400 mt-1">
+                Development seed (if enabled): ms.eman.zahy@test.com
+              </p>
+            )}
           </div>
         </div>
       </div>

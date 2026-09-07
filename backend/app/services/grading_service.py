@@ -44,17 +44,27 @@ def grade_multiple_choice(question: Question, answer_data: dict[str, Any]) -> Gr
     return GradeOutcome(is_correct=is_correct, awarded_marks=question.marks if is_correct else 0.0)
 
 
-def _correct_token_ids(data: dict[str, Any]) -> list[str]:
-    tokens = sorted(data.get("tokens", []), key=lambda t: t.get("correct_position", 0))
-    return [t.get("id") for t in tokens]
+def _ordered_tokens(data: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(data.get("tokens", []), key=lambda t: t.get("correct_position", 0))
 
 
 def grade_ordering(question: Question, answer_data: dict[str, Any]) -> GradeOutcome:
     _require_type(question, "ordering")
     data: dict[str, Any] = question.data or {}
-    correct_ids = _correct_token_ids(data)
+    correct = _ordered_tokens(data)
+    text_by_id = {t.get("id"): t.get("text") for t in correct}
     student_ids = list((answer_data or {}).get("token_ids", []) or [])
-    is_correct = correct_ids == student_ids
+
+    # Grade the sequence the student can actually SEE. Ordering questions may
+    # legitimately contain repeated words (e.g. "the cat and the dog"), each
+    # with its own token id but identical visible text. A student who taps the
+    # words in the right order must not be marked wrong for picking the other
+    # visually-identical token. Comparing texts (after the server validated the
+    # ids are a full permutation of this question's tokens) keeps every
+    # unique-token question byte-for-byte equivalent to the old id comparison.
+    student_texts = [text_by_id.get(tid) for tid in student_ids]
+    correct_texts = [t.get("text") for t in correct]
+    is_correct = student_texts == correct_texts
     return GradeOutcome(is_correct=is_correct, awarded_marks=question.marks if is_correct else 0.0)
 
 

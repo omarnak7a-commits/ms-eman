@@ -5,8 +5,10 @@ The backend decides deadlines, whether an attempt may continue, and every score.
 """
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core import security
@@ -35,7 +37,7 @@ from ..services.ranking_service import RankingService
 from ..services.snapshot import SnapshotQuestion, build_snapshot
 from ..services.snapshot import find as snapshot_find
 from ..services.snapshot import hydrate as snapshot_hydrate
-from ..services.student_service import find_or_create
+from ..services.student_service import find_or_create, normalize_name
 
 
 def _aware(dt):
@@ -76,6 +78,48 @@ class AttemptService:
             "max_score": sum(q.marks for q in questions),
         }
 
+    def _find_or_create_student(self, student_name: str):
+        """Race-safe version of find_or_create (unique normalized_name).
+
+        Two simultaneous first-ever starts for the same name race on the
+        unique ``students.normalized_name`` index. The loser rolls back and
+        re-reads the winner's row once it is committed (bounded retry: the
+        winner's transaction may not have committed yet on the first attempt).
+        """
+        for attempt in range(3):
+            try:
+                return find_or_create(self.db, student_name)
+            except IntegrityError:
+                self.db.rollback()
+                student = student_repo.get_by_normalized(
+                    self.db, normalize_name(student_name)
+                )
+                if student is not None:
+                    return student
+                if attempt == 2:  # pragma: no cover - 3 retries is generous
+                    raise
+                time.sleep(0.02)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _raise_if_already_attempted(self, exam_id: str, student_id: str) -> None:
+        """A student may attempt a given exam only once.
+
+        Raises the same ConflictError a sequential double-start produces; used
+        both as the normal guard and after losing a concurrent-insert race.
+        """
+        existing = exam_repo.attempts_for_exam(self.db, exam_id)
+        mine = [a for a in existing if a.student_id == student_id]
+        if not mine:
+            return
+        active = next((a for a in mine if a.status == "active"), None)
+        if active:
+            deadline = _aware(active.deadline_at)
+            if deadline and deadline > utcnow():
+                raise ConflictError(
+                    "You already have an active attempt for this exam.",
+                )
+        raise ConflictError("You have already attempted this exam.")
+
     def start(self, slug: str, student_name: str) -> StartAttemptResponse:
         exam = exam_repo.get_by_slug(self.db, slug)
         if not exam:
@@ -83,21 +127,11 @@ class AttemptService:
         if exam.status not in {"published", "active"}:
             raise ConflictError("This exam is not currently open.")
 
-        student = find_or_create(self.db, student_name)
-        # A student may attempt a given exam only once.
-        from ..repositories import exam_repo as _er
-
-        existing = _er.attempts_for_exam(self.db, exam.id)
-        mine = [a for a in existing if a.student_id == student.id]
-        if mine:
-            active = next((a for a in mine if a.status == "active"), None)
-            if active:
-                deadline = _aware(active.deadline_at)
-                if deadline and deadline > utcnow():
-                    raise ConflictError(
-                        "You already have an active attempt for this exam.",
-                    )
-            raise ConflictError("You have already attempted this exam.")
+        student = self._find_or_create_student(student_name)
+        self._raise_if_already_attempted(exam.id, student.id)
+        # Keep the id as a plain string: the rollback below expires ORM state,
+        # and the id never needs the database to exist.
+        student_id = student.id
 
         started = utcnow()
         deadline = started + timedelta(minutes=exam.duration_minutes)
@@ -105,16 +139,25 @@ class AttemptService:
         # question set (incl. correct answers for grading) is snapshotted
         # onto the attempt. Later teacher edits never touch this attempt.
         questions = question_repo.get_for_exam(self.db, exam.id)
-        attempt = attempt_repo.create(
-            self.db,
-            exam_id=exam.id,
-            student_id=student.id,
-            started_at=started,
-            deadline_at=deadline,
-            questions_snapshot=build_snapshot(questions),
-        )
-        token = self._issue_student_token(attempt.id)
-        self.db.commit()
+        try:
+            attempt = attempt_repo.create(
+                self.db,
+                exam_id=exam.id,
+                student_id=student_id,
+                started_at=started,
+                deadline_at=deadline,
+                questions_snapshot=build_snapshot(questions),
+            )
+            token = self._issue_student_token(attempt.id)
+            self.db.commit()
+        except IntegrityError:
+            # Two tabs/devices hit "Start" at the same moment: the partial
+            # unique index (one ACTIVE attempt per student+exam) made this
+            # insert lose. Roll back and answer exactly like a sequential
+            # double-start — never a second attempt, never a 500.
+            self.db.rollback()
+            self._raise_if_already_attempted(exam.id, student_id)
+            raise ConflictError("You have already attempted this exam.")
 
         payload = [
             student_payload(q) for q in questions
@@ -468,6 +511,9 @@ class AttemptService:
         attempt = self.get_owned(attempt_id, student_token)
         if attempt.status == "active":
             raise ConflictError("Submit the attempt before viewing results.")
+        result_visibility = attempt.exam.result_visibility if attempt.exam else False
+        if not result_visibility:
+            raise AuthorizationError("Result visibility is disabled for this exam.")
         result = self.submitted_out(attempt)
         if attempt.exam and attempt.exam.ranking_enabled:
             rank, total = RankingService(self.db).student_position(

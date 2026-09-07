@@ -375,3 +375,49 @@ def test_teacher_sees_results_and_detail(client, teacher):
     detail = client.get(f"/api/exams/{exam['id']}/results/{d['attempt_id']}", headers=teacher)
     assert detail.status_code == 200
     assert len(detail.json()["answers"]) == 3
+
+
+def test_reopen_shared_link_conflicts_then_token_resumes_active_attempt(client, teacher):
+    """M4: re-opening the shared exam link while an attempt is active must not
+    create a second attempt — and the stored attempt token can resume the
+    original one exactly where it was."""
+    exam = make_published_exam(client, teacher)
+    d = start(client, exam["slug"], "Reopen Sara")
+    # The student (same name) hits Start again via the shared link.
+    r = client.post(f"/api/exams/{exam['slug']}/start", json={"student_name": "Reopen Sara"})
+    assert r.status_code == 409
+    assert "active attempt" in r.json()["message"]
+
+    # With the original attempt token the attempt resumes, questions intact.
+    h = attempt_headers(d)
+    resume = client.get(f"/api/attempts/{d['attempt_id']}/resume", headers=h)
+    assert resume.status_code == 200
+    body = resume.json()
+    assert body["can_resume"] is True
+    assert body["status"]["status"] == "active"
+    assert len(body["questions"]) == 3
+    # Nothing pre-submission is ever revealed by resume.
+    assert body["answers"] == []
+
+
+def test_expired_attempt_never_resumes(client, teacher):
+    """M4: an attempt that crossed its server deadline is finalised and the
+    resume endpoint must not let the student back in."""
+    exam = make_published_exam(client, teacher)
+    d = start(client, exam["slug"], "Late Sara")
+    h = attempt_headers(d)
+    with TestingSession() as db:
+        attempt = db.get(ExamAttempt, d["attempt_id"])
+        attempt.deadline_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)
+        db.commit()
+
+    resume = client.get(f"/api/attempts/{d['attempt_id']}/resume", headers=h)
+    assert resume.status_code == 200
+    body = resume.json()
+    assert body["can_resume"] is False
+    assert body["status"]["status"] == "expired"
+    # No further answer can be saved.
+    qid = d["questions"][0]["id"]
+    r = client.put(f"/api/attempts/{d['attempt_id']}/answers/{qid}",
+                   json={"answer_data": correct_answers()["multiple_choice"]}, headers=h)
+    assert r.status_code == 409

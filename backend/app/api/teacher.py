@@ -323,9 +323,7 @@ def list_students(q: str | None = Query(default=None), db: Session = Depends(get
 
 @router.get("/students/{student_id}", response_model=StudentOut)
 def get_student(student_id: str, db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
-    from ..repositories.student_repo import get_by_id
-
-    s = get_by_id(db, student_id)
+    s = StudentService(db).get(teacher.id, student_id)
     if not s:
         raise NotFoundError("Student not found.")
     return StudentOut.model_validate(s)

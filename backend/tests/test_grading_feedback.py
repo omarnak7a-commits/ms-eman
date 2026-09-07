@@ -86,6 +86,113 @@ def test_incorrect_ordering_returns_full_correct_order(client, teacher):
     assert ca["correct_token_ids"] == ["t1", "t2", "t3", "t4"]
 
 
+def _ordering_exam(client, teacher, tokens):
+    exam = client.post(
+        "/api/exams",
+        json={"title": "Ordering", "duration_minutes": 30, "ranking_enabled": False,
+              "result_visibility": True, "review_visibility": True},
+        headers=teacher,
+    ).json()
+    r = client.post(
+        f"/api/exams/{exam['id']}/questions",
+        json={
+            "type": "ordering",
+            "text": "Arrange the sentence.",
+            "marks": 1,
+            "data": {"type": "ordering", "tokens": tokens},
+        },
+        headers=teacher,
+    )
+    assert r.status_code == 201, r.text
+    assert client.post(f"/api/exams/{exam['id']}/publish", headers=teacher).status_code == 200
+    return exam
+
+
+def test_ordering_with_repeated_visible_words_grades_the_seen_sequence(client, teacher):
+    """M1: when a sentence contains the same word twice, the student cannot
+    tell the two token ids apart — correctness must follow the visible text
+    sequence, not which visually-identical id was tapped."""
+    exam = _ordering_exam(
+        client, teacher,
+        [
+            {"id": "t1", "text": "the", "correct_position": 0},
+            {"id": "t2", "text": "cat", "correct_position": 1},
+            {"id": "t3", "text": "the", "correct_position": 2},
+            {"id": "t4", "text": "sat", "correct_position": 3},
+        ],
+    )
+    data = start(client, exam["slug"], "Repeated Word Kid")
+    headers = attempt_headers(data)
+    qid = _qid_by_type(data, "ordering")
+
+    # Correct visible sentence, but the two identical "the" ids are swapped.
+    r = _put(
+        client, data["attempt_id"], qid,
+        {"type": "ordering", "token_ids": ["t3", "t2", "t1", "t4"]},
+        headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is True, r.text
+    assert r.json()["correct_answer"] is None
+
+    # Ordering the two identical "the" ids the OTHER way round is visually the
+    # same sentence, so it is also correct (this is exactly the M1 fix).
+    data2 = start(client, exam["slug"], "Second Kid")
+    headers2 = attempt_headers(data2)
+    r2 = _put(
+        client, data2["attempt_id"], _qid_by_type(data2, "ordering"),
+        {"type": "ordering", "token_ids": ["t1", "t2", "t3", "t4"]},
+        headers2,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["is_correct"] is True, r2.text
+
+    # A genuinely different reading ("cat the the sat") is incorrect.
+    data3 = start(client, exam["slug"], "Third Kid")
+    headers3 = attempt_headers(data3)
+    r3 = _put(
+        client, data3["attempt_id"], _qid_by_type(data3, "ordering"),
+        {"type": "ordering", "token_ids": ["t2", "t1", "t3", "t4"]},  # "cat the the sat"
+        headers3,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["is_correct"] is False, r3.text
+
+
+def test_ordering_unique_tokens_still_id_exact(client, teacher):
+    """M1: unique-token questions keep the exact old behaviour — a single
+    swapped token is still wrong."""
+    exam = _ordering_exam(
+        client, teacher,
+        [
+            {"id": "t1", "text": "Ahmed", "correct_position": 0},
+            {"id": "t2", "text": "goes", "correct_position": 1},
+            {"id": "t3", "text": "to", "correct_position": 2},
+            {"id": "t4", "text": "school", "correct_position": 3},
+        ],
+    )
+    data = start(client, exam["slug"], "Unique Tokens Kid")
+    headers = attempt_headers(data)
+    qid = _qid_by_type(data, "ordering")
+
+    r = _put(
+        client, data["attempt_id"], qid,
+        {"type": "ordering", "token_ids": ["t1", "t2", "t4", "t3"]},  # "Ahmed goes school to"
+        headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is False, r.text
+
+    data2 = start(client, exam["slug"], "Unique Tokens Kid 2")
+    r2 = _put(
+        client, data2["attempt_id"], _qid_by_type(data2, "ordering"),
+        {"type": "ordering", "token_ids": ["t1", "t2", "t3", "t4"]},
+        attempt_headers(data2),
+    )
+    assert r2.status_code == 200
+    assert r2.json()["is_correct"] is True, r2.text
+
+
 def test_incorrect_single_bracket_returns_accepted_answer(client, teacher):
     exam = make_published_exam(client, teacher)
     data = start(client, exam["slug"], "Feedback Brackets")

@@ -112,3 +112,37 @@ def test_logout_all_revokes_everything(client, teacher_login):
 def test_password_is_never_plaintext(client, teacher_login, tmp_path):
     # login hashes are bcrypt in DB — covered by model design; smoke-check endpoint.
     _login(client, teacher_login)
+
+
+def test_expired_refresh_tokens_swept_on_login(client, teacher_login):
+    """L3: expired refresh-token rows are cleaned up opportunistically when a
+    teacher logs in — no scheduler needed and no live token is ever touched."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select, update
+
+    from conftest import TestingSession
+    from app.models import RefreshToken
+
+    s1 = _login(client, teacher_login)
+
+    # Age every stored refresh token past its expiry.
+    with TestingSession() as db:
+        db.execute(
+            update(RefreshToken).values(
+                expires_at=datetime.now(timezone.utc) - timedelta(days=1)
+            )
+        )
+        db.commit()
+
+    # Next login issues a fresh token and sweeps the expired row away.
+    s2 = _login(client, teacher_login)
+    assert s2["refresh"] != s1["refresh"]
+
+    with TestingSession() as db:
+        rows = db.execute(select(RefreshToken)).scalars().all()
+    assert len(rows) == 1  # only the freshly-issued token remains
+
+    # And that token is usable (cleanup did not touch live sessions).
+    r = client.post("/api/auth/refresh", json={"refresh_token": s2["refresh"]})
+    assert r.status_code == 200

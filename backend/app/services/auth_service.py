@@ -41,6 +41,11 @@ class AuthService:
         settings = get_settings()
         access_token, _ = security.create_access_token(teacher.id)
         raw_refresh = self._issue_refresh_token(teacher)
+        # Opportunistic cleanup (no scheduler): every login also sweeps expired
+        # refresh tokens. Safe — only rows past their expiry are removed, so
+        # no live session is ever affected; refresh() independently rejects
+        # expired tokens even if a row survives to the next cleanup.
+        refresh_token_repo.delete_expired(self.db, security.now_utc())
         self.db.commit()
         return TokenPair(
             access_token=access_token,
@@ -65,6 +70,8 @@ class AuthService:
 
         # Rotation: revoke old token, issue a fresh pair.
         refresh_token_repo.revoke(self.db, rt, now)
+        # Same opportunistic sweep as login (see issue_tokens).
+        refresh_token_repo.delete_expired(self.db, now)
 
         access_token, _ = security.create_access_token(teacher.id)
         raw_new_refresh = self._issue_refresh_token(teacher)
