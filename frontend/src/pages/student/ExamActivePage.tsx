@@ -85,12 +85,16 @@ function MCQAnswer({ question, selected, onAnswer, disabled }: {
                 : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
             } disabled:cursor-default`}
           >
-            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-              isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-            }`}>
+            <span
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+              translate="no"
+              aria-label={`Option ${String.fromCharCode(65 + i)}`}
+            >
               {String.fromCharCode(65 + i)}
             </span>
-            <span className="text-sm font-medium">{opt.text}</span>
+            <span className="text-sm font-medium" translate="no">{opt.text}</span>
           </button>
         );
       })}
@@ -109,6 +113,10 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
   const tokens = question.data.tokens || [];
   const usedIds = new Set(arranged);
   const available = tokens.filter(t => !usedIds.has(t.id));
+
+  const firstWordId = question.data.first_word_id;
+  const firstWordText = question.data.first_word;
+  const firstToken = tokens.find(t => (firstWordId && t.id === firstWordId) || (firstWordText && t.text === firstWordText));
 
   const tapToken = (id: string) => {
     if (disabled) return;
@@ -140,6 +148,7 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
                 key={slotIdx}
                 onClick={() => tokenId && removeFromSlot(slotIdx)}
                 disabled={disabled}
+                translate="no"
                 className={`px-3 py-2 rounded-xl border-2 text-sm font-medium min-w-12 transition-all ${
                   token
                     ? 'border-blue-400 bg-blue-50 text-blue-800 hover:border-red-400 hover:bg-red-50 hover:text-red-700'
@@ -155,17 +164,36 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
 
       <div className="mb-3">
         <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Available words</p>
+        {firstToken && (
+          <div className="mb-2 text-xs text-blue-600 font-medium flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+            First word: <strong className="font-semibold text-blue-800">{firstToken.text}</strong>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          {available.map(tok => (
-            <button
-              key={tok.id}
-              onClick={() => tapToken(tok.id)}
-              disabled={disabled}
-              className="px-4 py-2 rounded-xl bg-white border-2 border-slate-200 text-sm font-medium text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 transition-all disabled:opacity-50 active:scale-95"
-            >
-              {tok.text}
-            </button>
-          ))}
+          {available.map(tok => {
+            const isFirstWord = firstToken && tok.id === firstToken.id;
+            return (
+              <button
+                key={tok.id}
+                onClick={() => tapToken(tok.id)}
+                disabled={disabled}
+                translate="no"
+                className={`px-4 py-2 rounded-xl border-2 text-sm font-medium transition-all disabled:opacity-50 active:scale-95 flex items-center gap-1.5 ${
+                  isFirstWord
+                    ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-sm font-semibold'
+                    : 'bg-white border-slate-200 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700'
+                }`}
+              >
+                <span>{tok.text}</span>
+                {isFirstWord && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-600 text-white px-1.5 py-0.5 rounded-md">
+                    First
+                  </span>
+                )}
+              </button>
+            );
+          })} main
           {available.length === 0 && arranged.length === tokens.length && (
             <span className="text-xs text-slate-400 italic">All words placed.</span>
           )}
@@ -218,6 +246,7 @@ function BracketsAnswer({ question, values, onChange, disabled }: {
       <p
         data-testid="brackets-sentence"
         dir="auto"
+        translate="no"
         className="mb-4 px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-xl text-base text-slate-800 leading-relaxed"
       >
         {parts.map((part, i) =>
@@ -290,7 +319,7 @@ function CorrectAnswerReveal({ question, payload }: {
     const correct = (payload.options || []).filter(o =>
       (payload.correct_option_ids || []).includes(o.id));
     return (
-      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Correct answer</p>
         <p className="text-sm font-bold text-slate-800" dir="auto">
           {correct.map(o => o.text).join(' / ') || '—'}
@@ -299,16 +328,48 @@ function CorrectAnswerReveal({ question, payload }: {
     );
   }
   if (payload.type === 'ordering') {
+    const validOrders = payload.valid_orders || [];
+    if (validOrders.length > 1) {
+      return (
+        <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Accepted answers</p>
+          <ol className="space-y-2">
+            {validOrders.map((vo, idx) => (
+              <li key={idx} className="flex items-center gap-2 text-sm text-slate-800 flex-wrap">
+                <span className="w-5 h-5 rounded-full bg-red-50 border border-red-200 text-red-600 text-[11px] font-bold flex items-center justify-center shrink-0">
+                  {idx + 1}
+                </span>
+                <div className="flex flex-wrap gap-1 items-center">
+                  {(vo.tokens || []).map((t, ti) => (
+                    <span key={ti} className="flex items-center gap-1">
+                      <span className="px-2.5 py-1 rounded-lg bg-green-50 border border-green-200 text-xs font-semibold text-green-800">
+                        {t}
+                      </span>
+                      {ti < (vo.tokens || []).length - 1 && (
+                        <span className="text-slate-400 text-xs font-bold">→</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      );
+    }
+    const singleTokens = validOrders[0]?.tokens || payload.correct_tokens || [];
     return (
-      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Correct order</p>
-        <div className="flex flex-wrap gap-1.5">
-          {(payload.correct_tokens || []).map((t, i) => (
-            <span
-              key={i}
-              className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-800"
-            >
-              {t}
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {singleTokens.map((t, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <span className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-800">
+                {t}
+              </span>
+              {i < singleTokens.length - 1 && (
+                <span className="text-slate-400 text-xs font-bold">→</span>
+              )}
             </span>
           ))}
         </div>
@@ -319,7 +380,7 @@ function CorrectAnswerReveal({ question, payload }: {
   const items = (question.data.brackets || [])
     .map(b => ((payload.accepted_answers || {})[b.id] || []).join(' / '));
   return (
-    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
         {items.length > 1 ? 'Correct answers' : 'Correct answer'}
       </p>
@@ -589,20 +650,20 @@ export function ExamActivePage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-4 pb-8">
+    <div className="max-w-2xl mx-auto px-4 py-4 pb-8" translate="no">
       <ExamTeacherName className="mb-2" />
 
       <div className="flex items-center justify-between mb-4 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-slate-200 z-10">
         <div className="flex items-center gap-3">
           <Logo size="sm" />
           <div>
-            <div className="text-xs text-slate-500">{title}</div>
+            <div className="text-xs text-slate-500" translate="no">{title}</div>
             <div className="text-sm font-semibold text-slate-800">Q{currentIdx + 1} / {questions.length}</div>
           </div>
         </div>
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono font-bold text-sm ${
           secondsLeft < 60 ? 'bg-red-100 text-red-700' : secondsLeft < 300 ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-700'
-        }`}>
+        }`} translate="no">
           <span>⏱</span><span>{formatted}</span>
         </div>
       </div>

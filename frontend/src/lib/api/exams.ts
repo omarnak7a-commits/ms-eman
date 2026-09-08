@@ -64,6 +64,8 @@ export const examsApi = {
           type: string;
           options?: Array<{ id: string; text: string; order_index: number }>;
           tokens?: Array<{ id: string; text: string }>;
+          first_word?: string;
+          first_word_id?: string;
           sentence?: string;
           brackets?: Array<{ id: string; original_word: string }>;
         };

@@ -93,6 +93,8 @@ class OrderingTokenStudentView(BaseModel):
 class OrderingStudentView(BaseModel):
     type: str
     tokens: list[OrderingTokenStudentView]
+    first_word: str | None = None
+    first_word_id: str | None = None
 
 
 class BracketStudentView(BaseModel):

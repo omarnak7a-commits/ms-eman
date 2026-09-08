@@ -106,7 +106,7 @@ export function ExamStartPage() {
   // Guard against empty exams so starting one can never produce a silent 0.
   if (info.question_count === 0) {
     return (
-      <div className="max-w-md mx-auto px-4 py-8">
+      <div className="max-w-md mx-auto px-4 py-8" translate="no">
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="bg-blue-600 px-6 py-5 text-white text-center">
             <h2 className="text-xl font-bold">{info.title}</h2>
@@ -121,20 +121,20 @@ export function ExamStartPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8">
+    <div className="max-w-md mx-auto px-4 py-8" translate="no">
       <div className="flex justify-center mb-6">
         <Logo size="md" />
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="px-6 pt-6 pb-4 text-center border-b border-slate-100">
+        <div className="px-6 pt-6 pb-4 text-center border-b border-slate-100" translate="no">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium mb-1">Presented by</p>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">Ms Eman Zahy</h1>
         </div>
 
         <div className="bg-blue-600 px-6 py-5 text-white text-center">
-          <h2 className="text-xl font-bold">{info.title}</h2>
-          {info.description && <p className="text-blue-100 text-sm mt-1">{info.description}</p>}
+          <h2 className="text-xl font-bold" translate="no">{info.title}</h2>
+          {info.description && <p className="text-blue-100 text-sm mt-1" translate="no">{info.description}</p>}
         </div>
 
         <div className="px-6 py-5">
@@ -154,7 +154,7 @@ export function ExamStartPage() {
           </div>
 
           {info.instructions && (
-            <div className="mb-5">
+            <div className="mb-5" translate="no">
               <h2 className="text-sm font-semibold text-slate-700 mb-2">Instructions</h2>
               <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{info.instructions}</p>
             </div>

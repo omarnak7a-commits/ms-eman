@@ -44,13 +44,13 @@ export function RankingPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 py-6">
+    <div className="max-w-md mx-auto px-4 py-6" translate="no">
       <div className="flex justify-center mb-5"><Logo size="sm" /></div>
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-6">
         <div className="bg-blue-600 px-6 py-4 text-center text-white">
           <h1 className="text-lg font-bold">Leaderboard</h1>
-          <p className="text-blue-100 text-sm mt-0.5">{data.exam_title}</p>
+          <p className="text-blue-100 text-sm mt-0.5" translate="no">{data.exam_title}</p>
         </div>
 
         {data.entries.length === 0 ? (

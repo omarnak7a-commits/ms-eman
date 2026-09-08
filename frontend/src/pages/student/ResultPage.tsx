@@ -62,7 +62,7 @@ export function ResultPage() {
   const passed = attempt.percentage >= 50;
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8">
+    <div className="max-w-md mx-auto px-4 py-8" translate="no">
       <div className="flex justify-center mb-6"><Logo size="md" /></div>
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
