@@ -70,10 +70,66 @@ def validate_data(qtype: str, data: dict[str, Any]) -> dict[str, Any]:
                 }
             )
         _ensure_ids(clean)
-        # Re-derive positions by array order to guarantee consistency.
-        for pos, tok in enumerate(clean):
-            tok["correct_position"] = pos
-        return {"type": "ordering", "tokens": clean}
+
+        token_id_set = {t["id"] for t in clean}
+        num_tokens = len(clean)
+
+        # Validate multiple valid orders
+        valid_orders_input = data.get("valid_orders")
+        clean_valid_orders: list[list[str]] = []
+
+        if valid_orders_input is not None:
+            if not isinstance(valid_orders_input, list) or len(valid_orders_input) == 0:
+                raise ValidationError("Ordering requires at least one valid order.")
+            for order in valid_orders_input:
+                if not isinstance(order, list) or len(order) == 0:
+                    raise ValidationError("Valid order cannot be empty.")
+                if len(order) < num_tokens:
+                    raise ValidationError("Valid order is missing words.")
+                if len(order) > num_tokens:
+                    raise ValidationError("Valid order contains extra words.")
+                if len(set(order)) != len(order):
+                    raise ValidationError("Valid order contains duplicate words.")
+                if not all(tid in token_id_set for tid in order):
+                    raise ValidationError("Valid order contains invalid word references.")
+                clean_valid_orders.append([str(tid) for tid in order])
+        else:
+            # Legacy format / default: derive single valid order from array order
+            clean_valid_orders = [[t["id"] for t in clean]]
+
+        # Ensure at least one valid order
+        if not clean_valid_orders:
+            clean_valid_orders = [[t["id"] for t in clean]]
+
+        # Re-derive positions from the primary valid order for backward compatibility
+        primary_order = clean_valid_orders[0]
+        pos_map = {tid: pos for pos, tid in enumerate(primary_order)}
+        for tok in clean:
+            tok["correct_position"] = pos_map.get(tok["id"], 0)
+
+        result: dict[str, Any] = {
+            "type": "ordering",
+            "tokens": clean,
+            "valid_orders": clean_valid_orders,
+        }
+
+        # First word indicator (visual helper only)
+        first_word_id = data.get("first_word_id")
+        first_word_text = data.get("first_word")
+
+        if first_word_id and first_word_id in token_id_set:
+            matching_tok = next((t for t in clean if t["id"] == first_word_id), None)
+            result["first_word_id"] = first_word_id
+            result["first_word"] = matching_tok["text"] if matching_tok else first_word_text
+        elif first_word_text:
+            matching_tok = next((t for t in clean if t["text"] == first_word_text or t["id"] == first_word_text), None)
+            if matching_tok:
+                result["first_word_id"] = matching_tok["id"]
+                result["first_word"] = matching_tok["text"]
+            else:
+                result["first_word"] = str(first_word_text)
+
+        return result
 
     if qtype == "correct_brackets":
         sentence = (data.get("sentence") or "").strip()
@@ -145,7 +201,12 @@ def student_payload(question: Question, *, shuffle: bool = True) -> dict[str, An
         tokens = [{"id": o["id"], "text": o["text"]} for o in data.get("tokens", [])]
         if shuffle:
             random.shuffle(tokens)
-        return {**base, "data": {"type": "ordering", "tokens": tokens}}
+        ordering_data: dict[str, Any] = {"type": "ordering", "tokens": tokens}
+        if data.get("first_word"):
+            ordering_data["first_word"] = data["first_word"]
+        if data.get("first_word_id"):
+            ordering_data["first_word_id"] = data["first_word_id"]
+        return {**base, "data": ordering_data}
 
     # correct_brackets
     brackets = [
@@ -162,6 +223,25 @@ def student_payload(question: Question, *, shuffle: bool = True) -> dict[str, An
     }
 
 
+def get_valid_orders(data: dict[str, Any]) -> list[list[str]]:
+    """Return list of valid token ID sequences.
+
+    Supports both new `valid_orders` format and legacy single `correct_position` format.
+    """
+    valid_orders = data.get("valid_orders")
+    if valid_orders and isinstance(valid_orders, list):
+        result = []
+        for order in valid_orders:
+            if isinstance(order, list) and order:
+                result.append([str(tid) for tid in order])
+        if result:
+            return result
+
+    tokens = sorted(data.get("tokens", []), key=lambda t: t.get("correct_position", 0))
+    token_ids = [t.get("id") for t in tokens if t.get("id")]
+    return [token_ids] if token_ids else []
+
+
 def correct_answer_payload(question: Question) -> dict[str, Any]:
     """Used in review (after submission) and teacher attempt detail."""
     data: dict[str, Any] = question.data or {}
@@ -169,11 +249,25 @@ def correct_answer_payload(question: Question) -> dict[str, Any]:
         correct = [o for o in data.get("options", []) if o.get("is_correct")]
         return {"type": "multiple_choice", "options": data.get("options", []), "correct_option_ids": [o["id"] for o in correct]}
     if question.type == "ordering":
-        tokens = sorted(data.get("tokens", []), key=lambda t: t["correct_position"])
+        tokens_map = {t["id"]: t.get("text", "") for t in data.get("tokens", [])}
+        valid_orders = get_valid_orders(data)
+        primary_ids = valid_orders[0] if valid_orders else []
+        primary_tokens = [tokens_map.get(tid, "") for tid in primary_ids]
+
+        all_valid_orders = [
+            {
+                "token_ids": order,
+                "tokens": [tokens_map.get(tid, "") for tid in order],
+                "text": " ".join(tokens_map.get(tid, "") for tid in order),
+            }
+            for order in valid_orders
+        ]
+
         return {
             "type": "ordering",
-            "correct_token_ids": [t["id"] for t in tokens],
-            "correct_tokens": [t["text"] for t in tokens],
+            "correct_token_ids": primary_ids,
+            "correct_tokens": primary_tokens,
+            "valid_orders": all_valid_orders,
         }
     brackets = data.get("brackets", [])
     return {

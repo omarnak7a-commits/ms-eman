@@ -97,62 +97,278 @@ function OrderingEditor({ question, onChange }: {
   onChange: (q: Question) => void;
 }) {
   if (question.data.type !== 'ordering') return null;
-  const tokens = question.data.tokens;
+  const tokens = question.data.tokens || [];
+
+  // Derive valid_orders from question.data.valid_orders or fallback to token order
+  const validOrders: string[][] = (
+    question.data.valid_orders && question.data.valid_orders.length > 0
+      ? question.data.valid_orders
+      : tokens.length > 0
+      ? [tokens.map(t => t.id)]
+      : []
+  );
+
+  const firstWordId = question.data.first_word_id || '';
   const [sentence, setSentence] = useState(tokens.map(t => t.text).join(' '));
 
   const tokenize = (s: string) => {
     const words = s.trim().split(/\s+/).filter(Boolean);
     const toks: OrderingToken[] = words.map((w, i) => ({ id: uid(), text: w, correct_position: i }));
-    onChange({ ...question, data: { type: 'ordering', tokens: toks } });
+    const defaultOrder = toks.map(t => t.id);
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens: toks,
+        valid_orders: [defaultOrder],
+        first_word: toks[0]?.text || '',
+        first_word_id: toks[0]?.id || '',
+      },
+    });
   };
 
   const updateToken = (id: string, text: string) => {
     const updated = tokens.map(t => t.id === id ? { ...t, text } : t);
-    onChange({ ...question, data: { type: 'ordering', tokens: updated } });
+    const currentFirst = tokens.find(t => t.id === firstWordId);
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens: updated,
+        valid_orders: validOrders,
+        first_word: id === firstWordId ? text : currentFirst?.text,
+        first_word_id: firstWordId,
+      },
+    });
   };
 
   const removeToken = (id: string) => {
     const updated = tokens.filter(t => t.id !== id).map((t, i) => ({ ...t, correct_position: i }));
-    onChange({ ...question, data: { type: 'ordering', tokens: updated } });
+    const updatedOrders = validOrders.map(order => order.filter(tid => tid !== id));
+    const nextFirstWordId = firstWordId === id ? (updated[0]?.id || '') : firstWordId;
+    const nextFirstTok = updated.find(t => t.id === nextFirstWordId);
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens: updated,
+        valid_orders: updatedOrders,
+        first_word: nextFirstTok?.text,
+        first_word_id: nextFirstWordId || undefined,
+      },
+    });
   };
 
+  const addValidOrder = () => {
+    const baseOrder = validOrders[0] || tokens.map(t => t.id);
+    const nextOrders = [...validOrders, [...baseOrder]];
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens,
+        valid_orders: nextOrders,
+        first_word: question.data.type === 'ordering' ? question.data.first_word : undefined,
+        first_word_id: question.data.type === 'ordering' ? question.data.first_word_id : undefined,
+      },
+    });
+  };
+
+  const removeValidOrder = (orderIndex: number) => {
+    if (validOrders.length <= 1) return;
+    const nextOrders = validOrders.filter((_, i) => i !== orderIndex);
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens,
+        valid_orders: nextOrders,
+        first_word: question.data.type === 'ordering' ? question.data.first_word : undefined,
+        first_word_id: question.data.type === 'ordering' ? question.data.first_word_id : undefined,
+      },
+    });
+  };
+
+  const moveWordInOrder = (orderIndex: number, tokenPos: number, direction: -1 | 1) => {
+    const targetOrder = [...validOrders[orderIndex]];
+    const newPos = tokenPos + direction;
+    if (newPos < 0 || newPos >= targetOrder.length) return;
+    [targetOrder[tokenPos], targetOrder[newPos]] = [targetOrder[newPos], targetOrder[tokenPos]];
+    const nextOrders = validOrders.map((ord, i) => (i === orderIndex ? targetOrder : ord));
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens,
+        valid_orders: nextOrders,
+        first_word: question.data.type === 'ordering' ? question.data.first_word : undefined,
+        first_word_id: question.data.type === 'ordering' ? question.data.first_word_id : undefined,
+      },
+    });
+  };
+
+  const setFirstWord = (selectedTokenId: string) => {
+    const selectedTok = tokens.find(t => t.id === selectedTokenId);
+    onChange({
+      ...question,
+      data: {
+        type: 'ordering',
+        tokens,
+        valid_orders: validOrders,
+        first_word: selectedTok?.text || undefined,
+        first_word_id: selectedTokenId || undefined,
+      },
+    });
+  };
+
+  const tokenMap = new Map(tokens.map(t => [t.id, t]));
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div>
-        <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">Correct sentence</p>
+        <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">Sentence to split into words</p>
         <div className="flex gap-2">
           <input
             type="text"
             value={sentence}
             onChange={e => setSentence(e.target.value)}
-            placeholder="Ahmed goes to school every day."
+            placeholder="I went to school yesterday."
             className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
           <button
+            type="button"
             onClick={() => tokenize(sentence)}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium"
           >
             Tokenize
           </button>
         </div>
       </div>
+
       {tokens.length > 0 && (
-        <div>
-          <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Tokens (edit if needed)</p>
-          <div className="flex flex-wrap gap-2">
-            {tokens.map(tok => (
-              <div key={tok.id} className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
-                <input
-                  type="text"
-                  value={tok.text}
-                  onChange={e => updateToken(tok.id, e.target.value)}
-                  className="bg-transparent text-sm text-blue-800 w-16 focus:outline-none"
-                />
-                <button onClick={() => removeToken(tok.id)} className="text-blue-400 hover:text-red-500 text-xs">×</button>
-              </div>
-            ))}
+        <>
+          <div>
+            <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Words (edit text or remove)</p>
+            <div className="flex flex-wrap gap-2">
+              {tokens.map(tok => (
+                <div key={tok.id} className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
+                  <input
+                    type="text"
+                    value={tok.text}
+                    onChange={e => updateToken(tok.id, e.target.value)}
+                    className="bg-transparent text-sm text-blue-800 w-20 focus:outline-none font-medium"
+                    aria-label={`Token ${tok.text}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeToken(tok.id)}
+                    className="text-blue-400 hover:text-red-500 text-xs px-0.5"
+                    aria-label={`Remove word ${tok.text}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+
+          {/* First Word Setting */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <label className="block text-xs text-slate-600 font-medium uppercase tracking-wide mb-1.5">
+              First Word <span className="text-slate-400 font-normal lowercase">(visual indicator for students)</span>
+            </label>
+            <select
+              value={firstWordId || ''}
+              onChange={e => setFirstWord(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              aria-label="Select first word"
+            >
+              <option value="">(None — no visual indicator)</option>
+              {tokens.map((tok, i) => (
+                <option key={tok.id} value={tok.id}>
+                  {tok.text} (Word #{i + 1})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Valid Orders Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
+                Valid Correct Orders ({validOrders.length})
+              </p>
+              <button
+                type="button"
+                onClick={addValidOrder}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+              >
+                + Add another correct order
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {validOrders.map((order, orderIdx) => (
+                <div
+                  key={orderIdx}
+                  className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Valid Order #{orderIdx + 1}
+                      {orderIdx === 0 && <span className="text-slate-400 font-normal ml-1">(Primary)</span>}
+                    </span>
+                    {validOrders.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeValidOrder(orderIdx)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                        aria-label={`Delete valid order ${orderIdx + 1}`}
+                      >
+                        Delete Order
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {order.map((tid, tokenPos) => {
+                      const tok = tokenMap.get(tid);
+                      if (!tok) return null;
+                      return (
+                        <div
+                          key={`${orderIdx}-${tid}-${tokenPos}`}
+                          className="flex items-center bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-sm gap-1"
+                        >
+                          <button
+                            type="button"
+                            disabled={tokenPos === 0}
+                            onClick={() => moveWordInOrder(orderIdx, tokenPos, -1)}
+                            className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-[10px] font-bold px-0.5"
+                            aria-label={`Move ${tok.text} left in order ${orderIdx + 1}`}
+                          >
+                            ◀
+                          </button>
+                          <span className="text-xs font-semibold text-slate-800 px-1">
+                            {tok.text}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={tokenPos === order.length - 1}
+                            onClick={() => moveWordInOrder(orderIdx, tokenPos, 1)}
+                            className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-[10px] font-bold px-0.5"
+                            aria-label={`Move ${tok.text} right in order ${orderIdx + 1}`}
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -362,7 +578,7 @@ export function ExamDetailPage() {
 
   const addQuestion = (type: QuestionType) => {
     const defaultData = type === 'multiple_choice' ? mcqDefaults()
-      : type === 'ordering' ? { type: 'ordering' as const, tokens: [] as OrderingToken[] }
+      : type === 'ordering' ? { type: 'ordering' as const, tokens: [] as OrderingToken[], valid_orders: [] as string[][] }
       : { type: 'correct_brackets' as const, sentence: '', brackets: [] as BracketItem[] };
     const newQ: Question = {
       id: uid(),
@@ -403,8 +619,32 @@ export function ExamDetailPage() {
         if (q.data.options.some(o => !o.text.trim())) errs.push(`${label}: All options need text.`);
         if (q.data.options.filter(o => o.is_correct).length !== 1) errs.push(`${label}: Select exactly one correct answer.`);
       }
-      if (q.type === 'ordering' && q.data.type === 'ordering' && q.data.tokens.length < 2) {
-        errs.push(`${label}: Ordering requires at least 2 tokens.`);
+      if (q.type === 'ordering' && q.data.type === 'ordering') {
+        if (q.data.tokens.length < 2) {
+          errs.push(`${label}: Ordering requires at least 2 tokens.`);
+        }
+        if (q.data.tokens.some(t => !t.text.trim())) {
+          errs.push(`${label}: Ordering tokens cannot be empty.`);
+        }
+        const validOrders = q.data.valid_orders || [q.data.tokens.map(t => t.id)];
+        if (validOrders.length === 0) {
+          errs.push(`${label}: Ordering requires at least one valid order.`);
+        }
+        const tokenIds = new Set(q.data.tokens.map(t => t.id));
+        for (let i = 0; i < validOrders.length; i++) {
+          const order = validOrders[i];
+          if (!order || order.length !== q.data.tokens.length) {
+            errs.push(`${label}: Valid order #${i + 1} must contain all ${q.data.tokens.length} words.`);
+          } else {
+            const orderSet = new Set(order);
+            if (orderSet.size !== order.length) {
+              errs.push(`${label}: Valid order #${i + 1} contains duplicate words.`);
+            }
+            if (!order.every(tid => tokenIds.has(tid))) {
+              errs.push(`${label}: Valid order #${i + 1} contains invalid word references.`);
+            }
+          }
+        }
       }
       if (q.type === 'correct_brackets' && q.data.type === 'correct_brackets') {
         if (!q.data.sentence.includes('(')) errs.push(`${label}: Sentence must contain bracketed word, e.g. (go).`);

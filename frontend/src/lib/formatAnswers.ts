@@ -33,12 +33,26 @@ export function formatStudentAnswer(
   if (questionType === 'ordering') {
     const ids = (student.token_ids as string[]) || [];
     if (ids.length === 0) return '(not answered)';
+
+    // Build id -> text lookup map from valid_orders or correct_token_ids/correct_tokens
+    const tokenMap: Record<string, string> = {};
+    const validOrders = correct?.valid_orders as Array<{ token_ids?: string[]; tokens?: string[] }> | undefined;
+    if (validOrders && validOrders.length > 0) {
+      for (const vo of validOrders) {
+        if (vo.token_ids && vo.tokens) {
+          vo.token_ids.forEach((tid, i) => {
+            if (vo.tokens && vo.tokens[i]) tokenMap[tid] = vo.tokens[i];
+          });
+        }
+      }
+    }
     const correctIds = (correct?.correct_token_ids as string[]) || [];
     const texts = (correct?.correct_tokens as string[]) || [];
-    return ids.map(id => {
-      const i = correctIds.indexOf(id);
-      return i >= 0 ? (texts[i] ?? id) : id;
-    }).join(' ');
+    correctIds.forEach((id, i) => {
+      if (texts[i]) tokenMap[id] = texts[i];
+    });
+
+    return ids.map(id => tokenMap[id] ?? id).join(' → ');
   }
   if (questionType === 'correct_brackets') {
     const v = student.answer;
@@ -59,8 +73,17 @@ export function formatCorrectAnswer(questionType: string, correctInput: unknown)
     return texts.length ? texts.join(' / ') : '—';
   }
   if (questionType === 'ordering') {
+    const validOrders = correct.valid_orders as Array<{ tokens?: string[]; text?: string }> | undefined;
+    if (validOrders && validOrders.length > 1) {
+      return validOrders
+        .map((vo, i) => `${i + 1}. ${(vo.tokens || []).join(' → ') || vo.text || ''}`)
+        .join('  |  ');
+    }
+    if (validOrders && validOrders.length === 1 && validOrders[0].tokens) {
+      return validOrders[0].tokens.join(' → ');
+    }
     const texts = (correct.correct_tokens as string[]) || [];
-    return texts.length ? texts.join(' ') : '—';
+    return texts.length ? texts.join(' → ') : '—';
   }
   if (questionType === 'correct_brackets') {
     const acc = correct.accepted_answers as Record<string, string[]> | undefined;

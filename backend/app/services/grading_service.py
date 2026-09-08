@@ -46,15 +46,34 @@ def grade_multiple_choice(question: Question, answer_data: dict[str, Any]) -> Gr
 
 def _correct_token_ids(data: dict[str, Any]) -> list[str]:
     tokens = sorted(data.get("tokens", []), key=lambda t: t.get("correct_position", 0))
-    return [t.get("id") for t in tokens]
+    return [t.get("id") for t in tokens if t.get("id")]
+
+
+def get_valid_orders(data: dict[str, Any]) -> list[list[str]]:
+    """Return all valid token ID sequences for an ordering question.
+
+    Supports both new `valid_orders` format and legacy single `correct_position` format.
+    """
+    valid_orders = data.get("valid_orders")
+    if valid_orders and isinstance(valid_orders, list):
+        result = []
+        for order in valid_orders:
+            if isinstance(order, list) and order:
+                result.append([str(tid) for tid in order])
+        if result:
+            return result
+
+    tokens = sorted(data.get("tokens", []), key=lambda t: t.get("correct_position", 0))
+    token_ids = [t.get("id") for t in tokens if t.get("id")]
+    return [token_ids] if token_ids else []
 
 
 def grade_ordering(question: Question, answer_data: dict[str, Any]) -> GradeOutcome:
     _require_type(question, "ordering")
     data: dict[str, Any] = question.data or {}
-    correct_ids = _correct_token_ids(data)
+    valid_orders = get_valid_orders(data)
     student_ids = list((answer_data or {}).get("token_ids", []) or [])
-    is_correct = correct_ids == student_ids
+    is_correct = any(student_ids == order for order in valid_orders) if valid_orders else False
     return GradeOutcome(is_correct=is_correct, awarded_marks=question.marks if is_correct else 0.0)
 
 

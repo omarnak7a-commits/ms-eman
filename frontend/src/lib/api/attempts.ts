@@ -34,6 +34,8 @@ export interface StudentQuestion {
     type: string;
     options?: StudentOption[];
     tokens?: StudentToken[];
+    first_word?: string;
+    first_word_id?: string;
     sentence?: string;
     brackets?: Array<{ id: string; original_word: string }>;
   };

@@ -33,7 +33,13 @@ export interface BracketItem {
 
 export type QuestionData =
   | { type: 'multiple_choice'; options: MCQOption[] }
-  | { type: 'ordering'; tokens: OrderingToken[] }
+  | {
+      type: 'ordering';
+      tokens: OrderingToken[];
+      valid_orders?: string[][];
+      first_word?: string;
+      first_word_id?: string;
+    }
   | { type: 'correct_brackets'; sentence: string; brackets: BracketItem[] };
 
 export interface Question {
@@ -112,7 +118,12 @@ export type CorrectAnswerPayload =
       options: Array<{ id: string; text: string; order_index: number; is_correct?: boolean }>;
       correct_option_ids: string[];
     }
-  | { type: 'ordering'; correct_token_ids: string[]; correct_tokens: string[] }
+  | {
+      type: 'ordering';
+      correct_token_ids?: string[];
+      correct_tokens?: string[];
+      valid_orders?: Array<{ token_ids: string[]; tokens: string[]; text?: string }>;
+    }
   | { type: 'correct_brackets'; accepted_answers: Record<string, string[]> };
 
 export type AnswerData =

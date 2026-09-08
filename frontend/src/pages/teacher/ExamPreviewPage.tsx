@@ -35,11 +35,16 @@ function PreviewMCQ({ q }: { q: PreviewQuestion }) {
 }
 
 function PreviewOrdering({ q }: { q: PreviewQuestion }) {
+  const tokens = q.data.tokens || [];
+  const firstWordId = q.data.first_word_id;
+  const firstWordText = q.data.first_word;
+  const firstToken = tokens.find(t => (firstWordId && t.id === firstWordId) || (firstWordText && t.text === firstWordText));
+
   return (
     <div>
       <p className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">Your answer</p>
       <div className="flex flex-wrap gap-2">
-        {(q.data.tokens || []).map((tok, i) => (
+        {tokens.map((tok, i) => (
           <span
             key={tok.id}
             className="px-3 py-2 rounded-xl border-2 border-dashed border-slate-300 text-sm font-medium text-slate-400 min-w-12 text-center"
@@ -48,9 +53,39 @@ function PreviewOrdering({ q }: { q: PreviewQuestion }) {
           </span>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-3">
-        Available words: <span className="font-medium">{(q.data.tokens || []).map(t => t.text).join(' · ')}</span>
-      </p>
+      <div className="mt-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">Available words</p>
+          {firstToken && (
+            <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+              First word: <strong className="font-semibold text-blue-800">{firstToken.text}</strong>
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {tokens.map(tok => {
+            const isFirstWord = firstToken && tok.id === firstToken.id;
+            return (
+              <span
+                key={tok.id}
+                className={`px-3 py-1.5 rounded-xl border-2 text-sm font-medium flex items-center gap-1.5 ${
+                  isFirstWord
+                    ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-sm font-semibold'
+                    : 'bg-white border-slate-200 text-slate-700'
+                }`}
+              >
+                <span>{tok.text}</span>
+                {isFirstWord && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-600 text-white px-1.5 py-0.5 rounded-md">
+                    First
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
