@@ -5,7 +5,7 @@
  */
 export function ExamTeacherName({ className = '' }: { className?: string }) {
   return (
-    <div className={`text-center ${className}`} role="banner" aria-label="Teacher">
+    <div className={`text-center ${className}`} role="banner" aria-label="Teacher" translate="no">
       <p className="text-base sm:text-lg font-extrabold text-slate-800 tracking-tight">Ms Eman Zahy</p>
     </div>
   );

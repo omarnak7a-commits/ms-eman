@@ -1,11 +1,50 @@
 <!doctype html>
-<html lang="<!-- figma:lang -->">
+<html lang="en" translate="no" class="notranslate">
   <head>
     <!-- figma:head-start -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="google" content="notranslate" />
     <title><!-- figma:title --></title>
     <!-- figma:head-end -->
+    <script>
+      /*
+       * Anti-translation enforcement — runs as a classic (non-module) ES5
+       * script BEFORE any other JS, so Chrome's translation engine sees
+       * these signals before React mounts dynamic content.
+       *
+       * Chrome's translate engine sometimes ignores the translate="no"
+       * attribute alone, especially for SPA content rendered after page
+       * load. This script adds the class="notranslate" (which Chrome
+       * checks separately), reinforces the attribute, and uses a
+       * MutationObserver to ensure nothing removes them.
+       */
+      (function () {
+        var h = document.documentElement;
+        h.setAttribute('translate', 'no');
+        h.setAttribute('lang', 'en');
+        if (h.className.indexOf('notranslate') === -1) {
+          h.className = (h.className ? h.className + ' ' : '') + 'notranslate';
+        }
+        /* Persist these attributes even if a framework or extension mutates them. */
+        try {
+          var mo = new MutationObserver(function (muts) {
+            for (var i = 0; i < muts.length; i++) {
+              if (muts[i].attributeName === 'translate' && h.getAttribute('translate') !== 'no') {
+                h.setAttribute('translate', 'no');
+              }
+              if (muts[i].attributeName === 'lang' && h.getAttribute('lang') !== 'en') {
+                h.setAttribute('lang', 'en');
+              }
+              if (muts[i].attributeName === 'class' && h.className.indexOf('notranslate') === -1) {
+                h.className = (h.className ? h.className + ' ' : '') + 'notranslate';
+              }
+            }
+          });
+          mo.observe(h, { attributes: true, attributeFilter: ['translate', 'lang', 'class'] });
+        } catch (e) { /* old browser — ignore */ }
+      })();
+    </script>
     <script>
       /*
        * Boot watchdog — deliberately a CLASSIC (non-module) ES5 script so it
