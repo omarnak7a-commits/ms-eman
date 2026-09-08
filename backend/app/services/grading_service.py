@@ -1,4 +1,3 @@
-```python
 """Server-side grading engine.
 
 Grading is authoritative: the client never supplies a score. Only the backend
@@ -221,4 +220,3 @@ def grade_question(
     raise ValidationError(
         f"Unsupported question type: {question.type}"
     )
-```
