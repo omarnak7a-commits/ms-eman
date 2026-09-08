@@ -90,7 +90,7 @@ function MCQAnswer({ question, selected, onAnswer, disabled }: {
             }`}>
               {String.fromCharCode(65 + i)}
             </span>
-            <span className="text-sm font-medium">{opt.text}</span>
+            <span className="text-sm font-medium" translate="no">{opt.text}</span>
           </button>
         );
       })}
@@ -140,6 +140,7 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
                 key={slotIdx}
                 onClick={() => tokenId && removeFromSlot(slotIdx)}
                 disabled={disabled}
+                translate="no"
                 className={`px-3 py-2 rounded-xl border-2 text-sm font-medium min-w-12 transition-all ${
                   token
                     ? 'border-blue-400 bg-blue-50 text-blue-800 hover:border-red-400 hover:bg-red-50 hover:text-red-700'
@@ -161,6 +162,7 @@ function OrderingAnswer({ question, arranged, onAnswer, disabled }: {
               key={tok.id}
               onClick={() => tapToken(tok.id)}
               disabled={disabled}
+              translate="no"
               className="px-4 py-2 rounded-xl bg-white border-2 border-slate-200 text-sm font-medium text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 transition-all disabled:opacity-50 active:scale-95"
             >
               {tok.text}
@@ -218,6 +220,7 @@ function BracketsAnswer({ question, values, onChange, disabled }: {
       <p
         data-testid="brackets-sentence"
         dir="auto"
+        translate="no"
         className="mb-4 px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-xl text-base text-slate-800 leading-relaxed"
       >
         {parts.map((part, i) =>
@@ -290,7 +293,7 @@ function CorrectAnswerReveal({ question, payload }: {
     const correct = (payload.options || []).filter(o =>
       (payload.correct_option_ids || []).includes(o.id));
     return (
-      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Correct answer</p>
         <p className="text-sm font-bold text-slate-800" dir="auto">
           {correct.map(o => o.text).join(' / ') || '—'}
@@ -300,7 +303,7 @@ function CorrectAnswerReveal({ question, payload }: {
   }
   if (payload.type === 'ordering') {
     return (
-      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+      <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Correct order</p>
         <div className="flex flex-wrap gap-1.5">
           {(payload.correct_tokens || []).map((t, i) => (
@@ -319,7 +322,7 @@ function CorrectAnswerReveal({ question, payload }: {
   const items = (question.data.brackets || [])
     .map(b => ((payload.accepted_answers || {})[b.id] || []).join(' / '));
   return (
-    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3">
+    <div className="mt-3 rounded-xl bg-white border border-red-100 px-4 py-3" translate="no">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
         {items.length > 1 ? 'Correct answers' : 'Correct answer'}
       </p>
@@ -590,20 +593,20 @@ export function ExamActivePage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-4 pb-8">
+    <div className="max-w-2xl mx-auto px-4 py-4 pb-8" translate="no">
       <ExamTeacherName className="mb-2" />
 
       <div className="flex items-center justify-between mb-4 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-slate-200 z-10">
         <div className="flex items-center gap-3">
           <Logo size="sm" />
           <div>
-            <div className="text-xs text-slate-500">{title}</div>
+            <div className="text-xs text-slate-500" translate="no">{title}</div>
             <div className="text-sm font-semibold text-slate-800">Q{currentIdx + 1} / {questions.length}</div>
           </div>
         </div>
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono font-bold text-sm ${
           secondsLeft < 60 ? 'bg-red-100 text-red-700' : secondsLeft < 300 ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-700'
-        }`}>
+        }`} translate="no">
           <span>⏱</span><span>{formatted}</span>
         </div>
       </div>

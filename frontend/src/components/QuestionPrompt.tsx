@@ -21,8 +21,8 @@ export function QuestionPrompt({ type, text, className, bodyClassName }: Questio
 
   return (
     <>
-      {header && <p className={headerCls}>{header}</p>}
-      {body && <p className={bodyCls}>{body}</p>}
+      {header && <p className={headerCls} translate="no">{header}</p>}
+      {body && <p className={bodyCls} translate="no">{body}</p>}
     </>
   );
 }
