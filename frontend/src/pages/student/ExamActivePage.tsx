@@ -85,9 +85,13 @@ function MCQAnswer({ question, selected, onAnswer, disabled }: {
                 : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
             } disabled:cursor-default`}
           >
-            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-              isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-            }`}>
+            <span
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+              translate="no"
+              aria-label={`Option ${String.fromCharCode(65 + i)}`}
+            >
               {String.fromCharCode(65 + i)}
             </span>
             <span className="text-sm font-medium" translate="no">{opt.text}</span>
