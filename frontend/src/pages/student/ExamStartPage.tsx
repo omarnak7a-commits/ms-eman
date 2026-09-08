@@ -1,8 +1,43 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
-import { attemptsApi, setAttemptToken, type ExamPublicInfo } from '@/lib/api/attempts';
+import { attemptsApi, getAttemptToken, setAttemptToken, type ExamPublicInfo } from '@/lib/api/attempts';
+import { storageKeys } from '@/lib/storage';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+
+const ATTEMPT_TOKEN_PREFIX = 'ty_attempt_';
+
+/**
+ * When "Start" is refused because this student already has an ACTIVE attempt,
+ * the only way back in is the attempt token this device received when the
+ * attempt began (kept under ty_attempt_<id>). Scan ONLY this device's own
+ * tokens and resume the one that belongs to this exam, to the typed name, and
+ * is still running — no server change weakens the name-based identity model,
+ * and no other student's attempt id/token is ever touched or exposed.
+ */
+async function findResumableAttempt(examId: string, studentName: string): Promise<{ id: string; token: string } | null> {
+  const expected = studentName.trim().toLowerCase();
+  for (const key of storageKeys(ATTEMPT_TOKEN_PREFIX)) {
+    const attemptId = key.slice(ATTEMPT_TOKEN_PREFIX.length);
+    if (!attemptId) continue;
+    const token = getAttemptToken(attemptId);
+    if (!token) continue;
+    try {
+      const st = await attemptsApi.status(attemptId, token);
+      if (
+        st.exam_id === examId &&
+        st.status === 'active' &&
+        st.can_resume &&
+        st.student_name?.trim().toLowerCase() === expected
+      ) {
+        return { id: attemptId, token };
+      }
+    } catch {
+      // Stale/invalid token for an old attempt — keep scanning.
+    }
+  }
+  return null;
+}
 
 export function ExamStartPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -30,20 +65,22 @@ export function ExamStartPage() {
     if (!trimmed || trimmed.length < 2) { setError('Please enter your full name (at least 2 characters).'); return; }
     setError('');
     setStarting(true);
-    console.log('[EXAM DEBUG] Start Exam clicked', { slug, name: trimmed });
     try {
       const attempt = await attemptsApi.start(slug!, trimmed);
-      console.log('[EXAM DEBUG] Attempt created', {
-        attemptId: attempt.attempt_id,
-        status: attempt.status,
-        deadline: attempt.deadline_at,
-        durationSeconds: attempt.duration_seconds,
-        questionsCount: (attempt.questions || []).length,
-      });
       setAttemptToken(attempt.attempt_id, attempt.student_token);
       navigate(`/attempt/${attempt.attempt_id}`, { replace: true });
     } catch (err) {
-      setError((err as { message?: string })?.message || 'Failed to start exam. Please try again.');
+      const msg = (err as { message?: string })?.message || 'Failed to start exam. Please try again.';
+      // Reopening the shared exam link mid-attempt: the server refuses a
+      // second start, but if this device still holds the token for the
+      // running attempt, jump straight back into it.
+      const resumable = info ? await findResumableAttempt(info.id, trimmed) : null;
+      if (resumable) {
+        setAttemptToken(resumable.id, resumable.token);
+        navigate(`/attempt/${resumable.id}`, { replace: true });
+        return;
+      }
+      setError(msg);
       setStarting(false);
     }
   };

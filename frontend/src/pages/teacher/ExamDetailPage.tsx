@@ -965,7 +965,7 @@ export function ExamDetailPage() {
             <input
               type="number"
               min={1}
-              max={180}
+              max={600}
               value={exam.duration_minutes || ''}
               onChange={e => setExam(x => ({ ...x, duration_minutes: parseInt(e.target.value) || 0 }))}
               disabled={!canEdit}
@@ -1061,7 +1061,7 @@ export function ExamDetailPage() {
             Preview Exam
           </Link>
         )}
-        {!isNew && examStatus === 'published' && (
+        {!isNew && (examStatus === 'published' || examStatus === 'active') && (
           <button
             onClick={() => setCloseConfirm(true)}
             className="px-5 py-2.5 bg-slate-700 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors"

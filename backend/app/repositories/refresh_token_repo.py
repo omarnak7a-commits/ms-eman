@@ -39,4 +39,21 @@ def revoke_all_for_user(db: Session, user_id: str, at: datetime) -> None:
 
 
 def delete_expired(db: Session, now: datetime) -> None:
-    db.execute(delete(RefreshToken).where(RefreshToken.expires_at < now))
+    """Remove refresh tokens whose expiry has passed.
+
+    Never touches live (unexpired) tokens. PostgreSQL stores timezone-aware
+    timestamps; SQLite (tests/local dev) stores the same wall-clock value as a
+    naive datetime — normalise the cutoff to the dialect so the comparison is
+    correct on both. ``synchronize_session=False`` keeps the DELETE in SQL
+    instead of evaluating the datetime comparison against ORM objects.
+    """
+    from ..core.timeutil import ensure_utc
+
+    cutoff: datetime = ensure_utc(now)  # type: ignore[assignment]
+    if db.bind is not None and db.bind.dialect.name == "sqlite":
+        cutoff = cutoff.replace(tzinfo=None)
+    db.execute(
+        delete(RefreshToken)
+        .where(RefreshToken.expires_at < cutoff)
+        .execution_options(synchronize_session=False)
+    )

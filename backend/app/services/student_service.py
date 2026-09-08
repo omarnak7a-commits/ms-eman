@@ -39,9 +39,7 @@ class StudentService:
         else:
             students = student_repo.list_all(self.db)
 
-        exam_ids = {
-            e.id for e in exam_repo.list_for_teacher(self.db, owner_id)
-        }
+        exam_ids = self._owner_exam_ids(owner_id)
         all_attempts = self.db.query(ExamAttempt).all()
         by_student: dict[str, list[ExamAttempt]] = defaultdict(list)
         for a in all_attempts:
@@ -50,7 +48,14 @@ class StudentService:
 
         rows: list[StudentListItem] = []
         for s in students:
-            mine = [a for a in by_student.get(s.id, []) if a.status == "submitted"]
+            # Teacher scope: only students who actually attempted one of this
+            # teacher's exams may appear in the list. A Student row created by
+            # another teacher's exam (shared device/name pool) must never leak
+            # into this teacher's roster.
+            if s.id not in by_student:
+                continue
+            # Completed = submitted OR expired (deadline auto-submitted).
+            mine = [a for a in by_student[s.id] if a.status in {"submitted", "expired"}]
             scores = [a.percentage for a in mine]
             exam_ids_attempted = {a.exam_id for a in mine}
             last = max(mine, key=lambda a: a.submitted_at or a.created_at) if mine else None
@@ -74,3 +79,17 @@ class StudentService:
                 )
             )
         return rows
+
+    def get(self, owner_id: str, student_id: str) -> Student | None:
+        """A student visible to this teacher: attempted one of their exams."""
+        s = student_repo.get_by_id(self.db, student_id)
+        if not s:
+            return None
+        visible = self.db.query(ExamAttempt.id).filter(
+            ExamAttempt.student_id == student_id,
+            ExamAttempt.exam_id.in_(self._owner_exam_ids(owner_id)),
+        ).first()
+        return s if visible else None
+
+    def _owner_exam_ids(self, owner_id: str) -> set[str]:
+        return {e.id for e in exam_repo.list_for_teacher(self.db, owner_id)}

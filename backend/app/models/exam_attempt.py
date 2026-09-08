@@ -11,6 +11,7 @@ from sqlalchemy import (
     JSON,
     String,
     Index,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +23,19 @@ class ExamAttempt(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         # Lookup for "the active attempt of a student on an exam".
         Index("ix_exam_attempts_exam_student", "exam_id", "student_id"),
+        # DB-level guard for the double-start race: at most ONE active attempt
+        # per student per exam. Finalised (submitted/expired) rows are exempt,
+        # so legacy/historical duplicates keep working ("best attempt wins"
+        # semantics in rankings/stats). The partial predicate makes this safe
+        # on both PostgreSQL (production) and SQLite (tests).
+        Index(
+            "uq_exam_attempts_one_active_per_student",
+            "exam_id",
+            "student_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
     )
 
     exam_id: Mapped[str] = mapped_column(

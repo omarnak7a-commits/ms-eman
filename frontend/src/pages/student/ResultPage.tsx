@@ -36,6 +36,21 @@ export function ResultPage() {
   if (loading) return <LoadingSpinner className="min-h-[60vh]" />;
 
   if (error || !attempt) {
+    // The backend refuses to return the score when the exam's
+    // result_visibility is off. That is the authoritative gate — this screen
+    // just turns the 403 into a friendly, information-safe state.
+    const hiddenByTeacher = /visibility is disabled|disabled for this exam/i.test(error || '');
+    if (hiddenByTeacher) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
+          <Logo size="md" className="mb-4" />
+          <h1 className="text-xl font-bold text-slate-800 mb-2">Exam Submitted</h1>
+          <p className="text-slate-500 text-sm max-w-xs">
+            Your answers were received. This exam does not show results to students.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
         <Logo size="md" className="mb-4" />

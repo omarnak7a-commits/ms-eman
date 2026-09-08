@@ -164,6 +164,30 @@ describe('Student solving flow (real UI + real backend)', () => {
     expect((submitBtn as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('M4: reopening the shared exam link resumes the running attempt on this device', async () => {
+    const user = userEvent.setup();
+    // Same device as the original start: the attempt token is still stored.
+    setAttemptToken(attemptId, attemptToken);
+
+    // Student re-opens the shared link and enters their name again.
+    window.history.pushState({}, '', `/exam/${slug}`);
+    render(<App />);
+    await screen.findByText(/start exam/i, undefined, { timeout: 10000 });
+    await user.type(screen.getByPlaceholderText(/enter your name/i), `Flow Student ${RUN}`);
+    await user.click(screen.getByRole('button', { name: /^Start Exam$/ }));
+
+    // The server refuses a second start (409) and the page detects the stored
+    // token for this exam's active attempt → lands back on the attempt.
+    await screen.findByText('She ___ to school every day.', undefined, { timeout: 10000 });
+    expect(window.location.pathname).toBe(`/attempt/${attemptId}`);
+    // No second attempt was created server-side for the same name.
+    const login = await api('POST', '/auth/login', { email: TEACHER_EMAIL, password: TEACHER_PASSWORD });
+    const results = await api('GET', `/exams/${examId}/results`, undefined, login.access_token);
+    const actives = (results.attempts as Array<{ status: string }>)
+      .filter(a => a.status === 'active');
+    expect(actives).toHaveLength(1);
+  });
+
   it('MCQ: pick → change draft → Submit Answer → Incorrect feedback → locked', async () => {
     const user = userEvent.setup();
     await startAttemptPage();

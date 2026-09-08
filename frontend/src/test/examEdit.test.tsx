@@ -226,4 +226,29 @@ describe('Exam editor + versioning (real UI + real backend)', () => {
     const ans = resumeA.answers.find((a: { question_id: string }) => a.question_id === v1Ids[0]);
     expect(ans.is_correct).toBe(true);
   });
+
+  it('L2: an exam in "active" state (via the activate API) can be closed from the UI', async () => {
+    // Backend lifecycle: published → active → closed. The activate endpoint
+    // has no dedicated UI, but an exam that IS active must still be closable
+    // from the exam page instead of being stuck.
+    const activated = await api('POST', `/exams/${examId}/activate`, undefined, teacherToken);
+    expect(activated.status).toBe('active');
+
+    await seedTeacherSession();
+    window.history.pushState({}, '', `/exams/${examId}`);
+    render(<App />);
+    const user = userEvent.setup();
+    // Close Exam button is visible for an ACTIVE exam (was published-only).
+    const closeBtn = await screen.findByRole('button', { name: /close exam/i }, { timeout: 10000 });
+    await user.click(closeBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: /close exam/i });
+    await user.click(within(dialog).getByRole('button', { name: /close exam/i }));
+
+    // Server confirms the exam is closed.
+    await waitFor(async () => {
+      const exam = await api('GET', `/exams/${examId}`, undefined, teacherToken);
+      expect(exam.status).toBe('closed');
+    }, { timeout: 10000 });
+  });
 });

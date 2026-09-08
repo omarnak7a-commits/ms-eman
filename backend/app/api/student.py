@@ -120,4 +120,7 @@ def attempt_ranking(attempt_id: str, db: Session = Depends(get_db), token: str =
     attempt = svc.get_owned(attempt_id, token)
     if attempt.status == "active":
         raise ConflictError("Submit the attempt before viewing the ranking.")
+    ranking_enabled = attempt.exam.ranking_enabled if attempt.exam else False
+    if not ranking_enabled:
+        raise AuthorizationError("Ranking is disabled for this exam.")
     return svc.ranking(attempt.exam_id)

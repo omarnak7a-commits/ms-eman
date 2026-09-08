@@ -504,7 +504,6 @@ export function ExamActivePage() {
 
   const doSubmit = useCallback(async (source: string) => {
     if (submitting) return;
-    console.log('[EXAM DEBUG] SUBMIT CALLED', { source, attemptId: id });
     setSubmitting(true);
     setSaveError('');
     try {
