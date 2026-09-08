@@ -1,59 +1,57 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { Teacher } from '@/types';
 import {
   login as authLogin,
   logout as authLogout,
   getSession,
   clearSession as authClearSession,
+  hasPersistedSession,
+  restoreSession,
+  resetSessionRestoreForTests,
 } from '@/lib/auth';
 import { getAccessToken, getRefreshToken, onTeacherSessionInvalidated } from '@/lib/api/client';
 
-/**
- * Teacher session, held in ONE module-level store shared by every `useAuth()`
- * caller.
- *
- * This used to be component-local `useState`, which meant `AppRoutes` (whose
- * value drives `ProtectedRoute`) and `LoginPage` each owned a *separate* copy
- * of the session. After a successful sign-in only LoginPage's copy flipped to
- * authenticated, so the two disagreed:
- *
- *   LoginPage       -> <Navigate to="/dashboard" replace />   (I am signed in)
- *   ProtectedRoute  -> <Navigate to="/login" replace />       (no, you're not)
- *
- * React Router bounced between the two redirects and committed an empty tree:
- * a completely blank page with the URL still on /login and no error in the
- * console. It only reproduced on a device that did NOT already have a cached
- * session in localStorage — i.e. never on the desktop that had been logged in
- * for weeks, and every single time on a phone signing in for the first time.
- *
- * A single shared store removes the disagreement: both call sites read the
- * same snapshot and re-render together.
- */
-
-let currentTeacher: Teacher | null | undefined;
-const listeners = new Set<() => void>();
-
-function getSnapshot(): Teacher | null {
-  // Lazily hydrate from the cached profile on first read, then keep a stable
-  // reference so useSyncExternalStore does not loop.
-  if (currentTeacher === undefined) {
-    // Stale-cache hygiene: a cached profile with NO tokens left in storage
-    // (tokens cleared, private-browsing tab loss, manual wipe) can never
-    // authenticate. Treat it as signed out immediately instead of letting
-    // every protected page mount and 401 first.
-    if (!getAccessToken() && !getRefreshToken()) {
-      authClearSession();
-      currentTeacher = null;
-    } else {
-      currentTeacher = getSession();
-    }
-  }
-  return currentTeacher;
+interface AuthSnapshot {
+  teacher: Teacher | null;
+  initializing: boolean;
 }
 
-function setTeacher(next: Teacher | null): void {
-  currentTeacher = next;
-  for (const listener of listeners) listener();
+/**
+ * Teacher session, held in one module-level store shared by every `useAuth()`
+ * caller. Both the login page and ProtectedRoute therefore observe the same
+ * transition, including an invalid refresh session.
+ */
+let snapshot: AuthSnapshot | undefined;
+let authGeneration = 0;
+const listeners = new Set<() => void>();
+
+function getSnapshot(): AuthSnapshot {
+  if (!snapshot) {
+    let teacher: Teacher | null;
+    // A cached profile without either token can never authenticate. Drop it
+    // before deciding whether the app needs an async restore pass.
+    if (!getAccessToken() && !getRefreshToken()) {
+      authClearSession();
+      teacher = null;
+    } else {
+      teacher = getSession();
+    }
+
+    snapshot = {
+      teacher,
+      initializing: hasPersistedSession(),
+    };
+  }
+  return snapshot;
+}
+
+function publish(next: AuthSnapshot): void {
+  const previous = snapshot;
+  if (previous && previous.teacher === next.teacher && previous.initializing === next.initializing) {
+    return;
+  }
+  snapshot = next;
+  for (const listener of [...listeners]) listener();
 }
 
 function subscribe(listener: () => void): () => void {
@@ -63,38 +61,64 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-// When the API layer decides a teacher session is unrecoverable (401 with no
-// working refresh), it fires this hook. Resetting the SHARED store here is
-// what flips ProtectedRoute to signed-out and routes the teacher to /login —
-// and what guarantees the login page never bounces back to /dashboard.
+// If the API layer definitively rejects a refresh token, clear the cached
+// profile and move every mounted auth consumer to the signed-out state.
 onTeacherSessionInvalidated(() => {
+  authGeneration += 1;
   authClearSession();
-  setTeacher(null);
+  publish({ teacher: null, initializing: false });
 });
 
 /**
- * Test seam only: forget the in-memory session so the next snapshot read
- * re-hydrates from storage — exactly what a real page reload does. Without
- * this, jsdom tests would share one store across simulated "page loads".
+ * Test seam: simulate a full page load by discarding the module-level snapshot
+ * and the one-shot restore promise. Production page loads get a fresh module
+ * instance, so this is not part of the runtime auth flow.
  */
 export function __resetAuthStoreForTests(): void {
-  currentTeacher = undefined;
-  for (const listener of listeners) listener();
+  authGeneration += 1;
+  snapshot = undefined;
+  resetSessionRestoreForTests();
+  for (const listener of [...listeners]) listener();
 }
 
 export function useAuth() {
-  const teacher = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const auth = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  useEffect(() => {
+    const current = getSnapshot();
+    if (!current.initializing) return;
+
+    const generation = authGeneration;
+    restoreSession().then(teacher => {
+      // A login/logout that completed while restoration was in flight owns the
+      // store and must not be overwritten by the stale restore result.
+      if (generation !== authGeneration) return;
+      publish({ teacher, initializing: false });
+    });
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const t = await authLogin(email, password);
-    setTeacher(t);
-    return t;
+    const teacher = await authLogin(email, password);
+    authGeneration += 1;
+    publish({ teacher, initializing: false });
+    return teacher;
   }, []);
 
   const logout = useCallback(async () => {
-    await authLogout();
-    setTeacher(null);
+    // Cancel an in-flight restore before revoking the current session.
+    authGeneration += 1;
+    try {
+      await authLogout();
+    } finally {
+      publish({ teacher: null, initializing: false });
+    }
   }, []);
 
-  return { teacher, login, logout, isAuthenticated: !!teacher };
+  return {
+    teacher: auth.teacher,
+    login,
+    logout,
+    isAuthenticated: !!auth.teacher,
+    initializing: auth.initializing,
+  };
 }

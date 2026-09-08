@@ -7,6 +7,14 @@ export interface TokenPair {
   expires_in: number;
 }
 
+export interface MeResponse {
+  teacher: Teacher;
+}
+
+export async function me(): Promise<MeResponse> {
+  return request<MeResponse>('/auth/me');
+}
+
 export async function login(email: string, password: string): Promise<Teacher> {
   const tokens = await request<TokenPair>('/auth/login', {
     method: 'POST',
@@ -14,8 +22,8 @@ export async function login(email: string, password: string): Promise<Teacher> {
     auth: null,
   });
   setTokens(tokens.access_token, tokens.refresh_token);
-  const me = await request<{ teacher: Teacher }>('/auth/me');
-  return me.teacher;
+  const response = await me();
+  return response.teacher;
 }
 
 export async function changePassword(

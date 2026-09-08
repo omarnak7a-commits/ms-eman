@@ -4,7 +4,7 @@ import { Logo } from '@/components/Logo';
 import { useAuth } from '@/hooks/useAuth';
 
 export function LoginPage() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, initializing } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,7 +14,7 @@ export function LoginPage() {
   // Already signed in (e.g. returning to /login): redirect declaratively.
   // Calling navigate() during render triggers React Router's
   // "call navigate() in a useEffect" warning and a blank frame.
-  if (isAuthenticated) {
+  if (isAuthenticated && !initializing) {
     return <Navigate to="/dashboard" replace />;
   }
 

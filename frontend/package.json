@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run --no-file-parallelism",
     "preview": "vite preview",
     "format": "oxfmt"
   },

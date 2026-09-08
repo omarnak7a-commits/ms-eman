@@ -27,7 +27,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, initializing } = useAuth();
 
   return (
     <Routes>
@@ -44,7 +44,14 @@ function AppRoutes() {
       </Route>
 
       {/* Teacher routes - protected */}
-      <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} />}>
+      <Route
+        element={
+          <ProtectedRoute
+            isAuthenticated={isAuthenticated}
+            authLoading={initializing}
+          />
+        }
+      >
         <Route element={<TeacherLayout />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
