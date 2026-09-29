@@ -29,9 +29,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .api import auth_router, student_router, teacher_router
+from .db.session import engine
 from .core.config import get_settings
 from .core.exceptions import AppError
 
@@ -188,7 +190,15 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
-        return {"status": "ok", "service": settings.app_name}
+        """Readiness check: prove the configured database is reachable.
+
+        This intentionally performs a harmless query so a green production
+        health check cannot mask a missing, unreachable, or suspended Neon
+        database. SQLAlchemyError is converted by the global safe 503 handler.
+        """
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {"status": "ok", "service": settings.app_name, "database": "ok"}
 
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(teacher_router, prefix=settings.api_prefix)
