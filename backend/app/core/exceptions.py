@@ -40,3 +40,15 @@ class ValidationError(AppError):
 class ConflictError(AppError):
     status_code = 409
     code = "conflict"
+
+
+class DatabaseError(AppError):
+    """Raised (or mapped) when the database is unreachable or not migrated.
+
+    Surfaces as HTTP 503 so the client can tell an infrastructure/config
+    problem apart from a genuine client error. The human-facing message stays
+    generic on purpose; the real exception is logged server-side.
+    """
+
+    status_code = 503
+    code = "database_unavailable"

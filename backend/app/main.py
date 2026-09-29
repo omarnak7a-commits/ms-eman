@@ -21,12 +21,15 @@ prevents browsers (mobile ones in particular) from pinning a stale
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import SQLAlchemyError
 
 from .api import auth_router, student_router, teacher_router
 from .core.config import get_settings
@@ -34,12 +37,18 @@ from .core.exceptions import AppError
 
 settings = get_settings()
 
+logger = logging.getLogger("app")
+
+
+def _json_error(status_code: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "message": message, "detail": message},
+    )
+
 
 def _error_response(exc: AppError) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"code": exc.code, "message": exc.message, "detail": exc.message},
-    )
+    return _json_error(exc.status_code, exc.code, exc.message)
 
 
 def _frontend_dist() -> Path | None:
@@ -119,6 +128,63 @@ def create_app() -> FastAPI:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError):  # noqa: ARG001
         return _error_response(exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):  # noqa: ARG001
+        # FastAPI's default 422 body is a list under `detail`, which the SPA
+        # renders as an unhelpful "[object Object]". Return a clean, safe
+        # message (e.g. missing email/password) with the standard error shape.
+        errors = exc.errors()
+        try:
+            first = errors[0]
+            loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
+            reason = first.get("msg", "Invalid request.")
+            message = f"{loc}: {reason}" if loc else reason
+        except (IndexError, KeyError, TypeError):
+            message = "Invalid request."
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": message,
+                "detail": errors,
+            },
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def database_error_handler(request: Request, exc: SQLAlchemyError):
+        # The database is unreachable, misconfigured, or not migrated (e.g. a
+        # missing `teachers` table). This is the classic opaque-500 login
+        # failure. Log the real error server-side; hand the client a safe,
+        # actionable 503 instead of an unexplained 500.
+        logger.exception(
+            "Database error on %s %s: %s",
+            request.method,
+            request.url.path,
+            exc.__class__.__name__,
+        )
+        return _json_error(
+            503,
+            "database_unavailable",
+            "The service is temporarily unavailable due to a database error. "
+            "Please try again shortly.",
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(request: Request, exc: Exception):
+        # Last-resort safety net: never leak a stack trace or internal detail
+        # to the client, but ALWAYS log the full exception for diagnosis.
+        logger.exception(
+            "Unhandled error on %s %s: %s",
+            request.method,
+            request.url.path,
+            exc.__class__.__name__,
+        )
+        return _json_error(
+            500,
+            "internal_error",
+            "An unexpected error occurred. Please try again.",
+        )
 
     @app.get("/healthz")
     def healthz():

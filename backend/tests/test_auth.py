@@ -146,3 +146,46 @@ def test_expired_refresh_tokens_swept_on_login(client, teacher_login):
     # And that token is usable (cleanup did not touch live sessions).
     r = client.post("/api/auth/refresh", json={"refresh_token": s2["refresh"]})
     assert r.status_code == 200
+
+
+# ── Error-handling regressions: the "Request failed (500)" login bug ──────────
+# A login against a database that is unreachable / not migrated used to bubble
+# an unhandled SQLAlchemyError up as an opaque HTTP 500 with no body (the SPA
+# rendered it as "Request failed (500)"). It must now be a safe, meaningful
+# JSON error, and invalid input must be 401/422 — never 500.
+
+def test_login_missing_fields_returns_clean_422(client):
+    r = client.post("/api/auth/login", json={"email": "ms.eman.zahy@test.com"})
+    assert r.status_code == 422
+    body = r.json()
+    assert body["code"] == "validation_error"
+    # A human-readable message, not a raw list rendered as "[object Object]".
+    assert isinstance(body["message"], str) and body["message"]
+    assert "password" in body["message"].lower()
+
+
+def test_login_missing_body_returns_clean_422(client):
+    r = client.post("/api/auth/login", json={})
+    assert r.status_code == 422
+    assert r.json()["code"] == "validation_error"
+
+
+def test_login_database_error_returns_503_not_500(client, teacher_login, monkeypatch):
+    """A DB failure during login must surface as a safe 503, never a raw 500."""
+    from sqlalchemy.exc import OperationalError
+
+    from app.services import auth_service
+
+    def _boom(*_args, **_kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("no such table: teachers"))
+
+    monkeypatch.setattr(auth_service.teacher_repo, "get_by_email", _boom)
+
+    r = client.post("/api/auth/login", json=teacher_login)
+    assert r.status_code == 503
+    body = r.json()
+    assert body["code"] == "database_unavailable"
+    assert isinstance(body["message"], str) and body["message"]
+    # The internal SQL / driver detail must never leak to the client.
+    assert "teachers" not in body["message"]
+    assert "SELECT" not in body["message"]
