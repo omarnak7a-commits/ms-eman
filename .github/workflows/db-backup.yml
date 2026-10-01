@@ -1,0 +1,119 @@
+name: DB backup (Neon)
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup-production
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Install PostgreSQL client and GnuPG
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18 gnupg
+
+      - name: Verify PostgreSQL tools
+        run: |
+          pg_dump --version
+          pg_restore --version
+
+          pg_dump --version | grep -q "18\."
+          pg_restore --version | grep -q "18\."
+
+      - name: Create database dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL secret is missing"
+            exit 1
+          fi
+
+          PGURL="${DATABASE_URL/postgresql+psycopg2:/postgresql:}"
+
+          mkdir -p backup
+
+          pg_dump \
+            "$PGURL" \
+            --format=custom \
+            --compress=zstd:9 \
+            --file="backup/ms-eman-production.backup"
+
+      - name: Validate backup
+        run: |
+          set -euo pipefail
+
+          pg_restore \
+            --list \
+            "backup/ms-eman-production.backup" \
+            > backup/restore-list.txt
+
+          grep -q "TABLE DATA" backup/restore-list.txt
+
+          test -s backup/ms-eman-production.backup
+
+      - name: Encrypt backup
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
+            echo "BACKUP_PASSPHRASE secret is missing"
+            exit 1
+          fi
+
+          printf '%s' "$BACKUP_PASSPHRASE" | \
+            gpg \
+              --batch \
+              --yes \
+              --pinentry-mode loopback \
+              --passphrase-fd 0 \
+              --symmetric \
+              --cipher-algo AES256 \
+              --output "backup/ms-eman-production.backup.gpg" \
+              "backup/ms-eman-production.backup"
+
+          rm -f "backup/ms-eman-production.backup"
+
+      - name: Generate checksum and metadata
+        run: |
+          set -euo pipefail
+
+          sha256sum \
+            "backup/ms-eman-production.backup.gpg" \
+            > "backup/ms-eman-production.backup.gpg.sha256"
+
+          cat > backup/metadata.txt <<EOF
+          project=ms-eman
+          database=production
+          backup_format=postgresql-custom
+          encryption=AES256-GPG
+          created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          postgres_client=$(pg_dump --version)
+          EOF
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: ms-eman-db-backup-${{ github.run_id }}
+          path: |
+            backup/ms-eman-production.backup.gpg
+            backup/ms-eman-production.backup.gpg.sha256
+            backup/metadata.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
