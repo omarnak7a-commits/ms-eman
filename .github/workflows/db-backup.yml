@@ -24,23 +24,23 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y curl ca-certificates gnupg
-      
+
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
-      
+
           echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
-      
+
           sudo apt-get update
           sudo apt-get install -y postgresql-client-18
 
       - name: Verify PostgreSQL tools
         run: |
           set -euo pipefail
-      
+
           /usr/lib/postgresql/18/bin/pg_dump --version
           /usr/lib/postgresql/18/bin/pg_restore --version
-      
+
           /usr/lib/postgresql/18/bin/pg_dump --version | grep -q "18\."
           /usr/lib/postgresql/18/bin/pg_restore --version | grep -q "18\."
 
@@ -59,7 +59,7 @@ jobs:
 
           mkdir -p backup
 
-          pg_dump \
+          /usr/lib/postgresql/18/bin/pg_dump \
             "$PGURL" \
             --format=custom \
             --compress=zstd:9 \
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          pg_restore \
+          /usr/lib/postgresql/18/bin/pg_restore \
             --list \
             "backup/ms-eman-production.backup" \
             > backup/restore-list.txt
@@ -116,7 +116,7 @@ jobs:
           backup_format=postgresql-custom
           encryption=AES256-GPG
           created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          postgres_client=$(pg_dump --version)
+          postgres_client=$(/usr/lib/postgresql/18/bin/pg_dump --version)
           EOF
 
       - name: Upload encrypted backup
